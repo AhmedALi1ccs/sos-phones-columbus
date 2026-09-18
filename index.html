@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOS Phones — Property Search</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <span class="brand"><span class="dot"></span> SOS Phones</span>
+    <span class="spacer"></span>
+    <span id="whoHost"></span>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="banner"></div>
+
+  <div class="searchbar">
+    <span class="icon">🔎</span>
+    <input type="search" id="q" autocomplete="off" autofocus
+           placeholder="Search by property address, owner name, or mailing address…">
+  </div>
+  <p class="hint">Partial matches are fine — type any part of an address or a name. Minimum 3 characters.</p>
+
+  <div id="status" class="empty">Start typing to search 285,947 properties.</div>
+  <div id="results" class="results"></div>
+  <div id="more" style="margin-top:14px"></div>
+</main>
+
+<script src="config.js"></script>
+<script type="module" src="assets/search.js"></script>
+</body>
+</html>
