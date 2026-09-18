@@ -31,6 +31,26 @@ export const esc = (s) =>
 
 export const clean = (s) => (s == null ? "" : String(s).trim());
 
+/** Must match folio_norm()/county_norm() in sql/01_schema.sql exactly. */
+export function folioKey(f) {
+  return String(f ?? "").replace(/^\s*[Ff]\s*#\s*/, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+export function countyKey(c) {
+  return String(c ?? "").trim().toLowerCase();
+}
+
+/** The href for a property: keyed by parcel, so it survives a BuyBox reload. */
+export function propertyHref(row) {
+  const p = new URLSearchParams();
+  if (clean(row.folio)) {
+    p.set("folio", clean(row.folio));
+    if (clean(row.county)) p.set("county", clean(row.county));
+  } else {
+    p.set("id", row.id);          // 712 rows have no FOLIO to key on
+  }
+  return "property.html?" + p.toString();
+}
+
 export function digits(s) {
   return clean(s).replace(/\D/g, "");
 }

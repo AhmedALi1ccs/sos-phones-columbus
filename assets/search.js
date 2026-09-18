@@ -1,5 +1,5 @@
 import {
-  db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml, mountWho, toast
+  db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml, propertyHref, mountWho
 } from "./db.js";
 
 const PAGE = 25;
@@ -26,7 +26,7 @@ function resultHtml(r) {
   const lists = splitList(r.lists).slice(0, 6);
   const phones = Number(r.phone_count) || 0;
   return `
-    <a class="result" href="property.html?id=${encodeURIComponent(r.id)}">
+    <a class="result" href="${propertyHref(r)}">
       <span class="line1">
         <span class="addr">${esc(addr)}</span>
         <span class="name">${esc(clean(r.full_name))}</span>

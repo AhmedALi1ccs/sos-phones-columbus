@@ -9,6 +9,6 @@
 //                   RLS and would let anyone with the page URL rewrite BuyBox.
 // ---------------------------------------------------------------
 window.SOS_CONFIG = {
-  SUPABASE_URL: "https://hoahkpeblfxjbkhwbdxs.supabase.co",
-  SUPABASE_KEY: ""
+  SUPABASE_URL: 'https://hoahkpeblfxjbkhwbdxs.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_n0VMj8LBWVP9iahjZX1AEg_nUiTFZ3I',
 };

@@ -1,12 +1,12 @@
 -- SOS Phones : schema for property search + phone status tracking
--- Run with:  psql -f sql/01_schema.sql
+-- Safe to re-run.  Run with:  psql -f sql/01_schema.sql
 begin;
 
 create extension if not exists pg_trgm;
 
 -- ---------------------------------------------------------------
--- 1. Search support on the existing BuyBox table
---    Expression index only: the table itself is NOT altered, so bulk
+-- 1. Search + lookup support on the existing BuyBox table.
+--    Expression indexes only: the table itself is NOT altered, so bulk
 --    COPY / INSERT loads into BuyBox keep working unchanged.
 -- ---------------------------------------------------------------
 create index if not exists buybox_search_trgm on public."BuyBox" using gin (
@@ -17,29 +17,51 @@ create index if not exists buybox_search_trgm on public."BuyBox" using gin (
   ) gin_trgm_ops
 );
 
-create index if not exists buybox_folio_idx on public."BuyBox" ("FOLIO");
-create index if not exists mailed_folio_idx on public."Mailed" ("FOLIO");
-create index if not exists mailed_addr_idx  on public."Mailed" (lower("Property address"), lower("Property zip"));
+-- how a FOLIO is compared: case-folded, with the cosmetic "F# " prefix and all
+-- punctuation stripped,
+-- so 'F# 0442207000', 'f#0442207000' and '0442207000' are the same parcel.
+create or replace function public.folio_norm(f text) returns text
+  language sql immutable parallel safe as
+$$ select nullif(upper(regexp_replace(regexp_replace(coalesce(f,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g')), '') $$;
+
+create or replace function public.county_norm(c text) returns text
+  language sql immutable parallel safe as
+$$ select coalesce(lower(btrim(coalesce(c,''))), '') $$;
+
+-- the real business key of a property: parcel number + county
+create index if not exists buybox_folio_county_idx
+  on public."BuyBox" (public.folio_norm("FOLIO"), public.county_norm("Property county"));
+create index if not exists buybox_folio_idx on public."BuyBox" (public.folio_norm("FOLIO"));
+create index if not exists mailed_folio_idx on public."Mailed" (public.folio_norm("FOLIO"));
 
 -- ---------------------------------------------------------------
--- 2. Phone numbers : one row per phone, hung off BuyBox.id
+-- 2. Phone numbers : one row per phone, keyed to the property by
+--    FOLIO + county rather than BuyBox.id, so the link survives a
+--    full reload of BuyBox (ids get reassigned, parcel numbers do not).
 -- ---------------------------------------------------------------
 create table if not exists public.property_phones (
   id          bigint generated always as identity primary key,
-  property_id bigint not null references public."BuyBox"(id) on delete cascade,
-  phone       text   not null,
-  phone_norm  text   generated always as (regexp_replace(coalesce(phone,''), '\D', '', 'g')) stored,
+  folio       text not null,                  -- as stored in BuyBox, e.g. 'F# 0442207000'
+  county      text,                           -- parcel numbers repeat across counties
+  folio_key   text generated always as (upper(regexp_replace(regexp_replace(coalesce(folio,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g'))) stored,
+  county_key  text generated always as (lower(btrim(coalesce(county, ''))))                                   stored,
+  phone       text not null,
+  phone_norm  text generated always as (regexp_replace(coalesce(phone,''), '\D', '', 'g'))                    stored,
   slot        smallint,                       -- display order, 1..30
   label       text,                           -- Mobile / Landline / VOIP ...
   status      text check (status is null or status in ('correct','wrong','dead')),
   note        text,
   updated_by  text,
   created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  constraint property_phones_folio_not_blank check (btrim(folio) <> '')
 );
 
-create unique index if not exists property_phones_uniq on public.property_phones (property_id, phone_norm);
-create index if not exists property_phones_prop_idx on public.property_phones (property_id, slot, id);
+-- the same number cannot be listed twice on one parcel
+create unique index if not exists property_phones_uniq
+  on public.property_phones (folio_key, county_key, phone_norm);
+create index if not exists property_phones_prop_idx
+  on public.property_phones (folio_key, county_key, slot, id);
 create index if not exists property_phones_norm_idx on public.property_phones (phone_norm);
 
 -- keep updated_at honest
@@ -53,13 +75,15 @@ drop trigger if exists property_phones_touch on public.property_phones;
 create trigger property_phones_touch before update on public.property_phones
   for each row execute function public.tg_touch_updated_at();
 
--- cap at 30 phones per property
+-- cap at 30 phones per parcel
 create or replace function public.tg_phone_cap() returns trigger language plpgsql as $$
 declare n int;
 begin
-  select count(*) into n from public.property_phones where property_id = new.property_id;
+  select count(*) into n from public.property_phones p
+   where p.folio_key  = upper(regexp_replace(regexp_replace(coalesce(new.folio,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g'))
+     and p.county_key = lower(btrim(coalesce(new.county, '')));
   if n >= 30 then
-    raise exception 'property % already has 30 phone numbers', new.property_id
+    raise exception 'parcel % (% county) already has 30 phone numbers', new.folio, new.county
       using errcode = 'check_violation';
   end if;
   return new;

@@ -36,17 +36,38 @@ python3 -m http.server 8080
 | Object | Purpose |
 | --- | --- |
 | `buybox_search_trgm` | GIN trigram **expression** index over name + property address + mailing address. The `BuyBox` table itself is untouched, so bulk `COPY`/`INSERT` loads keep working. |
-| `search_properties(q, max_rows, skip)` | RPC used by the search box. Splits the query into tokens, requires every token to match somewhere in the record, folds typed words to the abbreviations the data uses (`street`→`st`, `drive`→`dr`, …), and ranks property-address hits first. |
-| `property_phones` | One row per phone number, keyed to `BuyBox.id`. |
+| `search_properties(q, max_rows, skip)` | Used by the search box. Splits the query into tokens, requires every token to match somewhere in the record, folds typed words to the abbreviations the data uses (`street`→`st`, `drive`→`dr`, …), and ranks property-address hits first. |
+| `folio_norm()` / `county_norm()` | How a parcel is compared: the cosmetic `F# ` prefix and all punctuation stripped, case-folded. `F# 0442207000`, `f#0442207000` and `0442207000` are the same parcel. **`assets/db.js` has matching `folioKey()`/`countyKey()` — change one and you must change the other.** |
+| `search_properties` / `get_property` / `get_mail_history` | RPCs the pages call. Properties are addressed by **parcel**, not by `BuyBox.id`. |
+| `property_phones` | One row per phone number, keyed to the property by **FOLIO + county**. |
 | RLS policies | Anyone with the link can **read** `BuyBox`/`Mailed` and **read+write** `property_phones`. `INSERT/UPDATE/DELETE` on `BuyBox`/`Mailed` are revoked from the public key. |
+
+### Why phones are keyed on FOLIO + county, not `BuyBox.id`
+
+`BuyBox.id` is unique but **not stable** — reload BuyBox from a fresh export and the ids
+get reassigned, which would silently move every phone number onto the wrong property.
+Parcel numbers survive a reload.
+
+FOLIO alone is not enough either: parcel numbers are unique *per county*, so **139 folios
+in BuyBox are shared by two genuinely different properties** in different counties
+(`F# 0310002020` is both *1221 George C Wilson Dr, Augusta GA* and *167 Miles Ashley Rd,
+Trenton SC*). FOLIO + county reduces that to 3 collisions, all of which are true duplicate
+rows of the same property. 712 rows (0.25%) have no FOLIO and cannot hold phone numbers;
+the property page says so plainly.
+
+> ⚠️ `folio_norm()` is used inside expression indexes. If you ever change it,
+> **drop and recreate** `buybox_folio_idx`, `buybox_folio_county_idx` and `mailed_folio_idx` —
+> Postgres does not rebuild them, and folio lookups will silently return nothing.
 
 ### `property_phones`
 
 | Column | Notes |
 | --- | --- |
-| `property_id` | → `BuyBox.id` (on delete cascade) |
+| `folio` | as stored in BuyBox, e.g. `F# 0442207000` |
+| `county` | disambiguates parcel numbers reused across counties |
+| `folio_key`, `county_key` | normalised, generated — what lookups and the unique index use |
 | `phone` | as entered / displayed |
-| `phone_norm` | digits only, generated — unique per property, so the same number can't be added twice |
+| `phone_norm` | digits only, generated — unique per parcel, so the same number can't be added twice |
 | `slot` | display order, 1–30 |
 | `label` | optional: Mobile / Landline / … |
 | `status` | `correct` \| `wrong` \| `dead` \| `NULL` |
@@ -54,7 +75,15 @@ python3 -m http.server 8080
 | `updated_by` | initials typed in the header (stored in the browser) |
 | `created_at`, `updated_at` | `updated_at` maintained by trigger |
 
-A trigger refuses the 31st number for a property.
+A trigger refuses the 31st number for a parcel.
+
+## Importing phone numbers
+
+The import file needs **`FOLIO`** plus the phone columns — either wide
+(`Phone 1`, `Phone 1 Type`, … `Phone 30`) or long (one row per phone). `County` is
+optional but resolves the 139 ambiguous parcel numbers; without it those rows are
+reported as rejects instead of being guessed at. Owner and address columns are not
+needed — they already live in `BuyBox`.
 
 > **Note on access:** the site is deliberately open — the anon key ships in `config.js`,
 > so anyone with the page URL can read the property list and edit phone statuses.
