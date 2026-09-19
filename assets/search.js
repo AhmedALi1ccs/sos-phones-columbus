@@ -27,6 +27,12 @@ const moreEl    = document.getElementById("more");
 
 mountWho(document.getElementById("whoHost"));
 
+/** The status line collapses when empty, instead of leaving a gap above the results. */
+function setStatus(html, isHtml = false) {
+  if (isHtml) statusEl.innerHTML = html; else statusEl.textContent = html || "";
+  statusEl.hidden = !html;
+}
+
 let seq = 0;          // guards against out-of-order responses
 let offset = 0;
 let currentQuery = "";
@@ -75,8 +81,7 @@ async function runSearch(term, append = false) {
     offset = 0;
     resultsEl.innerHTML = "";
     moreEl.innerHTML = "";
-    statusEl.textContent = "Searching…";
-    statusEl.className = "empty";
+    setStatus("Searching…");
   }
 
   const { data, error } = await db.rpc("search_properties", {
@@ -86,7 +91,7 @@ async function runSearch(term, append = false) {
   if (mine !== seq) return;                       // a newer search already fired
 
   if (error) {
-    statusEl.innerHTML = `<span class="err" style="display:block">Search failed: ${esc(error.message)}</span>`;
+    setStatus(`<span class="err" style="display:block">Search failed: ${esc(error.message)}</span>`, true);
     return;
   }
 
@@ -94,11 +99,11 @@ async function runSearch(term, append = false) {
   const rows = hasMore ? data.slice(0, PAGE) : data;
 
   if (!append && rows.length === 0) {
-    statusEl.textContent = `No matches for “${term}” in ${fieldEl.options[fieldEl.selectedIndex].text.toLowerCase()}.`;
+    setStatus(`No matches for “${term}” in ${fieldEl.options[fieldEl.selectedIndex].text.toLowerCase()}.`);
     return;
   }
 
-  statusEl.textContent = "";
+  setStatus("");
   resultsEl.insertAdjacentHTML("beforeend", rows.map(resultHtml).join(""));
   offset += rows.length;
 
@@ -129,8 +134,7 @@ function search() {
     seq++;                                        // cancel any in-flight response
     resultsEl.innerHTML = "";
     moreEl.innerHTML = "";
-    statusEl.className = "empty";
-    statusEl.textContent = term.length ? `Keep typing — at least ${min} characters.` : idleText();
+    setStatus(term.length ? `Keep typing — at least ${min} characters.` : idleText());
     return;
   }
   currentQuery = term;
@@ -158,13 +162,13 @@ if (!configured) {
   configBanner(document.getElementById("banner"));
   qEl.disabled = true;
   fieldEl.disabled = true;
-  statusEl.textContent = "";
+  setStatus("");
 } else {
   const initial = params.get("q");
   if (initial) {
     qEl.value = initial;
     search();
   } else {
-    statusEl.textContent = idleText();
+    setStatus(idleText());
   }
 }

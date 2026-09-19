@@ -51,12 +51,12 @@ header.top .wrap {
   padding-top: 14px; padding-bottom: 14px;
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
 }
-.brand { font-weight: 650; letter-spacing: -.01em; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.brand { flex: 0 0 auto; font-weight: 650; letter-spacing: -.01em; font-size: 16px; display: flex; align-items: center; gap: 8px; }
 .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
 .spacer { flex: 1 1 auto; }
 
 .who { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.who input { width: 110px; }
+.who input { width: 92px; flex: 0 0 auto; }
 
 input, select, textarea, button { font: inherit; color: inherit; }
 input[type=text], input[type=search], input[type=tel], select, textarea {
@@ -65,11 +65,39 @@ input[type=text], input[type=search], input[type=tel], select, textarea {
 }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 
-.searchbar { position: relative; margin: 28px 0 8px; }
-.searchbar input {
-  font-size: 17px; padding: 14px 16px 14px 44px; border-radius: 12px; box-shadow: var(--shadow);
+/* one pill holding the field picker and the query, so the two can never
+   drift out of alignment with each other */
+.searchrow {
+  display: flex; align-items: center; height: 54px; margin: 28px 0 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: var(--shadow);
 }
-.searchbar .icon { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; }
+.searchrow:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+
+select.fieldsel {
+  appearance: none; -webkit-appearance: none;
+  flex: 0 0 auto; width: auto; height: 100%; margin: 0;
+  padding: 0 32px 0 16px;
+  border: 0; border-radius: 14px 0 0 14px; background-color: transparent; box-shadow: none;
+  font-size: 14px; color: var(--muted); cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238b93a1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+select.fieldsel:focus, select.fieldsel:focus-visible { border: 0; box-shadow: none; outline: none; }
+
+.searchrow .divider { flex: 0 0 1px; height: 24px; background: var(--border); }
+.searchrow .icon {
+  flex: 0 0 auto; display: flex; align-items: center;
+  padding: 0 8px 0 12px; color: var(--muted); font-size: 15px; line-height: 1;
+}
+.searchrow input {
+  flex: 1 1 auto; min-width: 0;          /* without this the input overflows the page */
+  height: 100%; padding: 0 16px 0 0;
+  border: 0; border-radius: 0 14px 14px 0; background: transparent; box-shadow: none;
+  font-size: 16px;
+}
+.searchrow input:focus { border: 0; box-shadow: none; outline: none; }
+
 .hint { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
 
 .card {
@@ -109,7 +137,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 h1.addr { font-size: 26px; letter-spacing: -.02em; margin: 26px 0 2px; }
 .sub { color: var(--muted); margin: 0 0 20px; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 14px; }
 .panel { padding: 16px 18px; }
 .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
 dl.kv { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
@@ -182,6 +210,12 @@ dl.kv dd { margin: 0; }
 @media (max-width: 560px) {
   .phone-row .num { min-width: 118px; }
   .phone-row .meta { display: none; }
+  .wrap { padding-left: 16px; padding-right: 16px; }
+  select.fieldsel { padding: 0 28px 0 12px; font-size: 13px; }
+  .searchrow input { font-size: 15px; }
+  .searchrow .icon { padding: 0 6px 0 10px; }
+  .who { font-size: 12px; }
+  .who input { width: 72px; }
 }
 
 .phone-row select.typesel,
@@ -191,11 +225,3 @@ dl.kv dd { margin: 0; }
 }
 .phone-row select.typesel:hover, .addform select.typesel { border-color: var(--border); }
 .addform select.typesel { background: var(--surface); color: var(--text); }
-
-.searchrow { display: flex; gap: 10px; align-items: stretch; margin: 28px 0 8px; flex-wrap: wrap; }
-.searchrow .searchbar { flex: 1 1 320px; margin: 0; }
-select.fieldsel {
-  width: auto; min-width: 176px; border-radius: 12px; box-shadow: var(--shadow);
-  padding: 0 14px; font-size: 15px; background: var(--surface); cursor: pointer;
-}
-@media (max-width: 480px) { select.fieldsel { flex: 1 1 100%; padding: 11px 12px; } }
