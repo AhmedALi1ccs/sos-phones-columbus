@@ -48,7 +48,7 @@ create table if not exists public.property_phones (
   phone       text not null,
   phone_norm  text generated always as (regexp_replace(coalesce(phone,''), '\D', '', 'g'))                    stored,
   slot        smallint,                       -- display order, 1..30
-  label       text,                           -- Mobile / Landline / VOIP ...
+  phone_type  text check (phone_type is null or phone_type in ('landline','mobile')),
   status      text check (status is null or status in ('correct','wrong','dead')),
   note        text,
   updated_by  text,

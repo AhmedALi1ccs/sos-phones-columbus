@@ -69,7 +69,7 @@ the property page says so plainly.
 | `phone` | as entered / displayed |
 | `phone_norm` | digits only, generated — unique per parcel, so the same number can't be added twice |
 | `slot` | display order, 1–30 |
-| `label` | optional: Mobile / Landline / … |
+| `phone_type` | `landline` \| `mobile` \| `NULL` — shown as ☎️ / 📱 |
 | `status` | `correct` \| `wrong` \| `dead` \| `NULL` |
 | `note` | optional free text |
 | `updated_by` | initials typed in the header (stored in the browser) |
@@ -79,11 +79,25 @@ A trigger refuses the 31st number for a parcel.
 
 ## Importing phone numbers
 
-The import file needs **`FOLIO`** plus the phone columns — either wide
-(`Phone 1`, `Phone 1 Type`, … `Phone 30`) or long (one row per phone). `County` is
-optional but resolves the 139 ambiguous parcel numbers; without it those rows are
-reported as rejects instead of being guessed at. Owner and address columns are not
-needed — they already live in `BuyBox`.
+Long format, one row per phone:
+
+```csv
+FOLIO,Phone,Phone Type
+F# 077G222,7068369448,Mobile
+F# 077G222,7062284754,Residential
+```
+
+Wide format (`Phone 1`, `Phone 1 Type`, … `Phone 30`) works too.
+
+- **`FOLIO`** — required, in any format; the `F# ` prefix is optional.
+- **`Phone`** — required, in any format.
+- **`Phone Type`** — optional. Vendor wording is mapped to the two stored values:
+  `Mobile`/`Wireless`/`Cell` → `mobile`, `Residential`/`Landline`/`Home` → `landline`.
+  Anything else is stored as `NULL` and reported.
+- **`Status`** — optional, if you already have call outcomes.
+- **County** is looked up from BuyBox, not supplied. Only the 139 ambiguous parcel
+  numbers can't be resolved that way; those go to a rejects file rather than being guessed.
+- Owner and address columns are not needed — they already live in `BuyBox`.
 
 > **Note on access:** the site is deliberately open — the anon key ships in `config.js`,
 > so anyone with the page URL can read the property list and edit phone statuses.

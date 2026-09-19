@@ -24,6 +24,12 @@ export const STATUS = {
 };
 export const NO_STATUS = { symbol: "○", label: "No status" };
 
+/* ---------- line type ---------- */
+export const PHONE_TYPE = {
+  mobile:   { symbol: "📱", label: "Mobile" },
+  landline: { symbol: "☎️", label: "Landline" }
+};
+
 /* ---------- small helpers ---------- */
 export const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>

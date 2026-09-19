@@ -183,3 +183,11 @@ dl.kv dd { margin: 0; }
   .phone-row .num { min-width: 118px; }
   .phone-row .meta { display: none; }
 }
+
+.phone-row select.typesel,
+.addform select.typesel {
+  width: auto; min-width: 118px; padding: 5px 7px; font-size: 13px;
+  border-color: transparent; background: transparent; color: var(--muted);
+}
+.phone-row select.typesel:hover, .addform select.typesel { border-color: var(--border); }
+.addform select.typesel { background: var(--surface); color: var(--text); }

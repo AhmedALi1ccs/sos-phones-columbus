@@ -1,7 +1,7 @@
 import {
   db, configured, configBanner, esc, clean, digits, fmtPhone, cityLine, splitList,
   chipsHtml, fmtSaleDate, relTime, folioKey, countyKey, getWho, mountWho, toast,
-  STATUS, NO_STATUS
+  STATUS, NO_STATUS, PHONE_TYPE
 } from "./db.js";
 
 const MAX_PHONES = 30;
@@ -159,6 +159,7 @@ function renderBody() {
       ${STATUS.correct.symbol} Correct &nbsp;·&nbsp; ${STATUS.wrong.symbol} Wrong number &nbsp;·&nbsp;
       ${STATUS.dead.symbol} Dead line &nbsp;·&nbsp; ${NO_STATUS.symbol} not checked yet.
       Click a symbol to set it, click it again to clear.
+      Line type is ${PHONE_TYPE.mobile.symbol} mobile or ${PHONE_TYPE.landline.symbol} landline.
     </p>`;
 }
 
@@ -206,7 +207,11 @@ function phoneRowHtml(ph) {
     <div class="phone-row" data-row="${ph.id}">
       <a class="num ${st === "dead" || st === "wrong" ? "struck" : ""}"
          href="tel:${esc(digits(ph.phone))}">${esc(fmtPhone(ph.phone))}</a>
-      <span class="label">${esc(clean(ph.label))}</span>
+      <select class="typesel" data-type="${ph.id}" title="Line type">
+        <option value=""${!clean(ph.phone_type) ? " selected" : ""}>—</option>
+        ${Object.entries(PHONE_TYPE).map(([k, v]) =>
+          `<option value="${k}"${ph.phone_type === k ? " selected" : ""}>${v.symbol} ${v.label}</option>`).join("")}
+      </select>
       <span class="statusgroup">${buttons}</span>
       <span class="note"><input type="text" data-note="${ph.id}" value="${esc(ph.note || "")}" placeholder="note…"></span>
       <span class="meta">${ph.status && ph.updated_at ? `${esc(clean(ph.updated_by) || "—")} · ${esc(relTime(ph.updated_at))}` : ""}</span>
@@ -223,7 +228,10 @@ function renderPhones() {
                    : `<div class="phone-row"><span class="hint">No phone numbers yet for this parcel.</span></div>`) +
     `<form class="addform" id="addForm">
        <input type="tel"  class="tel" id="newPhone" placeholder="Add phone number" ${full ? "disabled" : ""}>
-       <input type="text" class="lbl" id="newLabel" placeholder="label (optional)" ${full ? "disabled" : ""}>
+       <select class="typesel" id="newType" ${full ? "disabled" : ""}>
+         <option value="">— type —</option>
+         ${Object.entries(PHONE_TYPE).map(([k, v]) => `<option value="${k}">${v.symbol} ${v.label}</option>`).join("")}
+       </select>
        <button class="btn" type="submit" ${full ? "disabled" : ""}>Add</button>
        ${full ? `<span class="hint" style="align-self:center">Limit of ${MAX_PHONES} reached.</span>` : ""}
      </form>`;
@@ -236,6 +244,8 @@ function renderPhones() {
     b.addEventListener("click", () => removePhone(Number(b.dataset.del))));
   host.querySelectorAll("[data-note]").forEach((i) =>
     i.addEventListener("change", () => saveNote(Number(i.dataset.note), i.value)));
+  host.querySelectorAll("[data-type]").forEach((sel) =>
+    sel.addEventListener("change", () => saveType(Number(sel.dataset.type), sel.value)));
 
   document.getElementById("addForm").addEventListener("submit", addPhone);
 }
@@ -263,6 +273,19 @@ async function setStatus(phoneId, status) {
   toast(next ? `${STATUS[next].symbol} ${STATUS[next].label}` : "Status cleared");
 }
 
+async function saveType(phoneId, value) {
+  const ph = phones.find((p) => p.id === phoneId);
+  const next = value || null;
+  rowBusy(phoneId, true);
+  const { data, error } = await db.from("property_phones")
+    .update({ phone_type: next, updated_by: getWho() || null })
+    .eq("id", phoneId).select().single();
+  rowBusy(phoneId, false);
+  if (error) { toast(error.message, true); renderPhones(); return; }
+  Object.assign(ph, data);
+  toast(next ? `${PHONE_TYPE[next].symbol} ${PHONE_TYPE[next].label}` : "Type cleared");
+}
+
 async function saveNote(phoneId, note) {
   const { error } = await db.from("property_phones")
     .update({ note: note.trim() || null, updated_by: getWho() || null })
@@ -284,7 +307,7 @@ async function addPhone(ev) {
       folio: property.folio,
       county: property.county || null,
       phone: fmtPhone(raw) || raw,
-      label: document.getElementById("newLabel").value.trim() || null,
+      phone_type: document.getElementById("newType").value || null,
       slot,
       updated_by: getWho() || null
     }).select().single();
