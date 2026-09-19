@@ -89,6 +89,18 @@ F# 077G222,7062284754,Residential
 
 Wide format (`Phone 1`, `Phone 1 Type`, … `Phone 30`) works too.
 
+```bash
+python3 scripts/import_phones.py Book1.csv           # dry run, writes nothing
+python3 scripts/import_phones.py Book1.csv --apply   # commit
+```
+
+The importer runs inside a transaction and **defaults to a dry run**, printing what
+would happen. Anything it cannot place — folio missing, folio not in BuyBox, ambiguous
+parcel, malformed number, over the 30 cap — goes to `<file>_rejects.csv` with a reason.
+Numbers already in the table are skipped rather than duplicated, so re-running the same
+file is safe. `--fill-type` additionally back-fills `phone_type` on rows that are already
+there but have none.
+
 - **`FOLIO`** — required, in any format; the `F# ` prefix is optional.
 - **`Phone`** — required, in any format.
 - **`Phone Type`** — optional. Vendor wording is mapped to the two stored values:
