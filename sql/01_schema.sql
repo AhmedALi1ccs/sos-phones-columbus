@@ -32,6 +32,9 @@ $$ select coalesce(lower(btrim(coalesce(c,''))), '') $$;
 create index if not exists buybox_folio_county_idx
   on public."BuyBox" (public.folio_norm("FOLIO"), public.county_norm("Property county"));
 create index if not exists buybox_folio_idx on public."BuyBox" (public.folio_norm("FOLIO"));
+-- lets "search by FOLIO" match a fragment, not just a prefix
+create index if not exists buybox_folio_trgm on public."BuyBox"
+  using gin (public.folio_norm("FOLIO") gin_trgm_ops);
 create index if not exists mailed_folio_idx on public."Mailed" (public.folio_norm("FOLIO"));
 
 -- ---------------------------------------------------------------

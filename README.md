@@ -3,7 +3,9 @@
 A static site (GitHub Pages) for searching the `BuyBox` property list in Supabase and
 tracking phone numbers per property.
 
-- **Search** by any part of a property address, owner name, or mailing address.
+- **Search** by any part of a property address, owner name, mailing address or FOLIO,
+  with a dropdown to pick which field to search. The chosen field is kept in the URL
+  (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
 - **Property page** shows the owner + address block, the `Lists` distresses, mail history,
   and up to **30 phone numbers**, each with a status: ✅ Correct · ❌ Wrong · 💀 Dead
   (no status = ○). Click a symbol to set it, click it again to clear it.
@@ -36,7 +38,7 @@ python3 -m http.server 8080
 | Object | Purpose |
 | --- | --- |
 | `buybox_search_trgm` | GIN trigram **expression** index over name + property address + mailing address. The `BuyBox` table itself is untouched, so bulk `COPY`/`INSERT` loads keep working. |
-| `search_properties(q, max_rows, skip)` | Used by the search box. Splits the query into tokens, requires every token to match somewhere in the record, folds typed words to the abbreviations the data uses (`street`→`st`, `drive`→`dr`, …), and ranks property-address hits first. |
+| `search_properties(q, max_rows, skip, field)` | Used by the search box; `field` is `all` \| `property` \| `name` \| `mailing` \| `folio`. Splits the query into tokens, requires every token to match somewhere in the record, folds typed words to the abbreviations the data uses (`street`→`st`, `drive`→`dr`, …), and ranks property-address hits first. A scoped search still filters through the indexed full-record expression first, so no extra index is needed per field — and it runs ~5× faster than `all` because less survives to be ranked. `folio` is matched on the normalised parcel number instead, so `F# 077G222`, `077G222` and the fragment `077G22` all work. |
 | `folio_norm()` / `county_norm()` | How a parcel is compared: the cosmetic `F# ` prefix and all punctuation stripped, case-folded. `F# 0442207000`, `f#0442207000` and `0442207000` are the same parcel. **`assets/db.js` has matching `folioKey()`/`countyKey()` — change one and you must change the other.** |
 | `search_properties` / `get_property` / `get_mail_history` | RPCs the pages call. Properties are addressed by **parcel**, not by `BuyBox.id`. |
 | `property_phones` | One row per phone number, keyed to the property by **FOLIO + county**. |

@@ -19,12 +19,20 @@
 <main class="wrap">
   <div id="banner"></div>
 
-  <div class="searchbar">
-    <span class="icon">🔎</span>
-    <input type="search" id="q" autocomplete="off" autofocus
-           placeholder="Search by property address, owner name, or mailing address…">
+  <div class="searchrow">
+    <select id="field" class="fieldsel" aria-label="Search by">
+      <option value="all">All fields</option>
+      <option value="property">Property address</option>
+      <option value="name">Owner name</option>
+      <option value="mailing">Mailing address</option>
+      <option value="folio">FOLIO</option>
+    </select>
+    <div class="searchbar">
+      <span class="icon">&#128269;</span>
+      <input type="search" id="q" autocomplete="off" autofocus>
+    </div>
   </div>
-  <p class="hint">Partial matches are fine — type any part of an address or a name. Minimum 3 characters.</p>
+  <p class="hint" id="hint"></p>
 
   <div id="status" class="empty">Start typing to search 285,947 properties.</div>
   <div id="results" class="results"></div>

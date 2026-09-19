@@ -2,18 +2,20 @@
 begin;
 
 drop function if exists public.search_properties(text, int, int);
+drop function if exists public.search_properties(text, int, int, text);
 drop function if exists public.get_property(text, text);
 drop function if exists public.get_mail_history(text);
 
 -- ---------------------------------------------------------------
--- search_properties(q) : partial, multi-token, case-insensitive match
--- across owner name, property address and mailing address.
--- Every token must appear somewhere in the record.
+-- search_properties(q, max_rows, skip, field)
+--   field = all | property | name | mailing | folio
+-- Partial, multi-token, case-insensitive.  Every token must appear.
 -- ---------------------------------------------------------------
 create function public.search_properties(
   q         text,
   max_rows  int  default 50,
-  skip      int  default 0
+  skip      int  default 0,
+  field     text default 'all'
 )
 returns table (
   id               bigint,
@@ -37,10 +39,27 @@ language plpgsql
 stable
 as $fn$
 declare
-  blob   constant text :=
+  -- everything in one string: this is the expression the trigram index is built on
+  blob_all constant text :=
     $$lower(coalesce(b."Full Name",'')||' '||coalesce(b."First Name",'')||' '||coalesce(b."Last Name",'')||' '||
       coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property state",'')||' '||coalesce(b."Property zip",'')||' '||
       coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing state",'')||' '||coalesce(b."Mailing zip",''))$$;
+  blob_prop constant text :=
+    $$lower(coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property state",'')||' '||coalesce(b."Property zip",''))$$;
+  blob_name constant text :=
+    $$lower(coalesce(b."Full Name",'')||' '||coalesce(b."First Name",'')||' '||coalesce(b."Last Name",''))$$;
+  blob_mail constant text :=
+    $$lower(coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing state",'')||' '||coalesce(b."Mailing zip",''))$$;
+
+  cols constant text :=
+    $$b.id, b."FOLIO", b."Property county", b."Full Name", b."First Name", b."Last Name",
+      b."Property address", b."Property city", b."Property state", b."Property zip",
+      b."Mailing address", b."Mailing city", b."Mailing state", b."Mailing zip",
+      b."Lists",
+      (select count(*) from public.property_phones p
+        where p.folio_key  = public.folio_norm(b."FOLIO")
+          and p.county_key = public.county_norm(b."Property county"))$$;
+
   -- the data stores addresses abbreviated; fold what people actually type
   abbrev constant text[][] := array[
     ['street','st'],['avenue','ave'],['drive','dr'],['road','rd'],['lane','ln'],
@@ -49,7 +68,11 @@ declare
     ['north','n'],['south','s'],['east','e'],['west','w'],
     ['northeast','ne'],['northwest','nw'],['southeast','se'],['southwest','sw']
   ];
+
+  fld        text := lower(coalesce(field, 'all'));
+  scope      text;
   norm       text;
+  fkey       text;
   toks       text[];
   t          text;
   a          text[];
@@ -58,7 +81,34 @@ declare
   name_score text := '0';
   mail_score text := '0';
   sql        text;
+  lim        int  := greatest(1, least(coalesce(max_rows, 50), 200));
+  off        int  := greatest(0, coalesce(skip, 0));
 begin
+  -- ---- a FOLIO is a parcel number, not prose: match the normalised form ----
+  if fld = 'folio' then
+    fkey := public.folio_norm(q);
+    if fkey is null or length(fkey) < 2 then
+      return;
+    end if;
+    return query execute format($q$
+      select %s
+      from public."BuyBox" b
+      where public.folio_norm(b."FOLIO") like %L
+      order by (public.folio_norm(b."FOLIO") = %L) desc,
+               (public.folio_norm(b."FOLIO") like %L) desc,
+               b."Property address" nulls last, b.id
+      limit %s offset %s
+    $q$, cols, '%' || fkey || '%', fkey, fkey || '%', lim, off);
+    return;
+  end if;
+
+  scope := case fld
+             when 'property' then blob_prop
+             when 'name'     then blob_name
+             when 'mailing'  then blob_mail
+             else null
+           end;
+
   norm := lower(coalesce(q, ''));
   norm := regexp_replace(norm, '[^a-z0-9]+', ' ', 'g');
   norm := btrim(norm);
@@ -74,28 +124,21 @@ begin
 
   foreach t in array toks loop
     if t <> '' then
-      wheres := wheres || format(' and %s like %L', blob, '%' || t || '%');
-      -- relevance: how many tokens land in the property address vs the owner name
-      addr_score := addr_score || format(
-        ' + (case when lower(coalesce(b."Property address",'''')||'' ''||coalesce(b."Property city",'''')||'' ''||coalesce(b."Property zip",'''')) like %L then 1 else 0 end)',
-        '%' || t || '%');
-      name_score := name_score || format(
-        ' + (case when lower(coalesce(b."Full Name",'''')) like %L then 1 else 0 end)',
-        '%' || t || '%');
-      mail_score := mail_score || format(
-        ' + (case when lower(coalesce(b."Mailing address",'''')||'' ''||coalesce(b."Mailing city",'''')||'' ''||coalesce(b."Mailing zip",'''')) like %L then 1 else 0 end)',
-        '%' || t || '%');
+      -- blob_all is the indexed expression, so it always carries the search;
+      -- the scoped blob then narrows the result to the chosen field.
+      wheres := wheres || format(' and %s like %L', blob_all, '%' || t || '%');
+      if scope is not null then
+        wheres := wheres || format(' and %s like %L', scope, '%' || t || '%');
+      end if;
+      -- relevance: how many tokens land in the address vs the owner name
+      addr_score := addr_score || format(' + (case when %s like %L then 1 else 0 end)', blob_prop, '%' || t || '%');
+      name_score := name_score || format(' + (case when %s like %L then 1 else 0 end)', blob_name, '%' || t || '%');
+      mail_score := mail_score || format(' + (case when %s like %L then 1 else 0 end)', blob_mail, '%' || t || '%');
     end if;
   end loop;
 
   sql := format($q$
-    select b.id, b."FOLIO", b."Property county", b."Full Name", b."First Name", b."Last Name",
-           b."Property address", b."Property city", b."Property state", b."Property zip",
-           b."Mailing address", b."Mailing city", b."Mailing state", b."Mailing zip",
-           b."Lists",
-           (select count(*) from public.property_phones p
-             where p.folio_key  = public.folio_norm(b."FOLIO")
-               and p.county_key = public.county_norm(b."Property county"))
+    select %s
     from public."BuyBox" b
     where true %s
     order by greatest(%s, %s, %s) desc,
@@ -103,12 +146,11 @@ begin
              (lower(coalesce(b."Property address",'')) like %L) desc,
              b."Property address" nulls last, b.id
     limit %s offset %s
-  $q$, wheres,
+  $q$, cols, wheres,
        addr_score, name_score, mail_score,
-       addr_score,
+       case fld when 'name' then name_score when 'mailing' then mail_score else addr_score end,
        replace(norm, ' ', '%') || '%',
-       greatest(1, least(coalesce(max_rows, 50), 200)),
-       greatest(0, coalesce(skip, 0)));
+       lim, off);
 
   return query execute sql;
 end
@@ -203,10 +245,10 @@ revoke insert, update, delete, truncate on public."BuyBox", public."Mailed" from
 grant  select on public."BuyBox", public."Mailed" to anon, authenticated;
 grant  select, insert, update, delete on public.property_phones to anon, authenticated;
 grant  usage on all sequences in schema public to anon, authenticated;
-grant  execute on function public.search_properties(text, int, int) to anon, authenticated;
-grant  execute on function public.get_property(text, text)          to anon, authenticated;
-grant  execute on function public.get_mail_history(text)            to anon, authenticated;
-grant  execute on function public.folio_norm(text)                  to anon, authenticated;
-grant  execute on function public.county_norm(text)                 to anon, authenticated;
+grant  execute on function public.search_properties(text, int, int, text) to anon, authenticated;
+grant  execute on function public.get_property(text, text)                to anon, authenticated;
+grant  execute on function public.get_mail_history(text)                  to anon, authenticated;
+grant  execute on function public.folio_norm(text)                        to anon, authenticated;
+grant  execute on function public.county_norm(text)                       to anon, authenticated;
 
 commit;
