@@ -33,6 +33,19 @@
   </div>
   <p class="hint" id="hint"></p>
 
+  <section class="card filters" id="filters">
+    <div class="filters-head">
+      <h2>Filter by distress</h2>
+      <span class="filters-count" id="filterCount"></span>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="clearFilters" hidden>Clear</button>
+      <button class="btn" id="exportBtn" disabled>Export CSV</button>
+    </div>
+    <div class="chips toggles" id="distressChips">
+      <span class="hint">Loading distress reasons…</span>
+    </div>
+  </section>
+
   <div id="status" class="empty">Start typing to search 285,947 properties.</div>
   <div id="results" class="results"></div>
   <div id="more" style="margin-top:14px"></div>

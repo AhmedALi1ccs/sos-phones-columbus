@@ -6,6 +6,12 @@ tracking phone numbers per property.
 - **Search** by any part of a property address, owner name, mailing address or FOLIO,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
+- **Filter by distress** on the home page: the reasons in `Lists` as toggle chips with
+  counts. Picking several narrows to records carrying **all** of them, and it combines
+  with the search box. The selection lives in the URL (`?d=probate|high+equity`).
+- **Export CSV** of whatever is filtered — property fields plus each parcel's phone
+  numbers flattened into `Phone 1`, `Phone 1 Type`, `Phone 1 Status`, … the same shape
+  the importer reads.
 - **Property page** shows the owner + address block, the `Lists` distresses, mail history,
   and up to **30 phone numbers**, each with a status: ✅ Correct · ❌ Wrong · 💀 Dead
   (no status = ○). Click a symbol to set it, click it again to clear it.
@@ -42,6 +48,9 @@ python3 -m http.server 8080
 | `folio_norm()` / `county_norm()` | How a parcel is compared: the cosmetic `F# ` prefix and all punctuation stripped, case-folded. `F# 0442207000`, `f#0442207000` and `0442207000` are the same parcel. **`assets/db.js` has matching `folioKey()`/`countyKey()` — change one and you must change the other.** |
 | `search_properties` / `get_property` / `get_mail_history` | RPCs the pages call. Properties are addressed by **parcel**, not by `BuyBox.id`. |
 | `property_phones` | One row per phone number, keyed to the property by **FOLIO + county**. |
+| `distress_norm()` / `distress_keys()` | Fold the `Lists` spellings to one key per reason (`HIGH EQUITY`/`High equity`/`High Equity` → `high equity`, `Tax Del` → `tax delinquent`). 30 raw values become 20 reasons. |
+| `distress_vocab` | Materialised view of reason → label → count, read by `list_distresses()`. |
+| `buybox_lists_gin` | GIN containment index over `distress_keys("Lists")`, so filtering by reason is a bitmap scan (~1ms) rather than a 286k-row scan. |
 | RLS policies | Anyone with the link can **read** `BuyBox`/`Mailed` and **read+write** `property_phones`. `INSERT/UPDATE/DELETE` on `BuyBox`/`Mailed` are revoked from the public key. |
 
 ### Why phones are keyed on FOLIO + county, not `BuyBox.id`
@@ -57,9 +66,23 @@ Trenton SC*). FOLIO + county reduces that to 3 collisions, all of which are true
 rows of the same property. 712 rows (0.25%) have no FOLIO and cannot hold phone numbers;
 the property page says so plainly.
 
-> ⚠️ `folio_norm()` is used inside expression indexes. If you ever change it,
-> **drop and recreate** `buybox_folio_idx`, `buybox_folio_county_idx` and `mailed_folio_idx` —
-> Postgres does not rebuild them, and folio lookups will silently return nothing.
+> ⚠️ `folio_norm()` and `distress_keys()` are used inside expression indexes. If you
+> ever change either, **drop and recreate** the indexes built on them
+> (`buybox_folio_idx`, `buybox_folio_county_idx`, `buybox_folio_trgm`, `mailed_folio_idx`,
+> `buybox_lists_gin`) — Postgres does not rebuild them, and lookups will silently
+> return nothing.
+
+### After reloading BuyBox
+
+The distress list and its counts are materialised, because computing them live is an
+11-second scan. Once new data is loaded, refresh them:
+
+```sql
+select public.refresh_distress_vocab();
+```
+
+Until you do, the chips show the previous load's reasons and counts. Filtering, search
+and everything else read BuyBox directly and are never stale.
 
 ### `property_phones`
 
@@ -78,6 +101,13 @@ the property page says so plainly.
 | `created_at`, `updated_at` | `updated_at` maintained by trigger |
 
 A trigger refuses the 31st number for a parcel.
+
+## Exporting
+
+The Export button pages through `export_properties()` 1,000 rows at a time and builds
+the CSV in the browser, so it is capped at **50,000 records**; beyond that you get the
+first 50,000 and a warning. The big reasons (`Individual`, `HIGH EQUITY`, `ABSENTEE`)
+are over that on their own — narrow them with a second reason or a search term first.
 
 ## Importing phone numbers
 

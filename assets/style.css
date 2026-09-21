@@ -225,3 +225,28 @@ dl.kv dd { margin: 0; }
 }
 .phone-row select.typesel:hover, .addform select.typesel { border-color: var(--border); }
 .addform select.typesel { background: var(--surface); color: var(--text); }
+
+/* ---- distress filter panel ---- */
+.filters { padding: 14px 16px 16px; margin-bottom: 20px; }
+.filters-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.filters-head h2 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--muted); margin: 0; font-weight: 600;
+}
+.filters-count { font-size: 13px; color: var(--accent); font-weight: 550; }
+.filters-head .btn { padding: 6px 14px; font-size: 13px; }
+
+.chips.toggles { gap: 6px; }
+.chip-toggle {
+  font: inherit; font-size: 12.5px; line-height: 1.4;
+  padding: 4px 11px; border-radius: 999px; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.chip-toggle:hover { border-color: var(--muted); }
+.chip-toggle .n { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chip-toggle[aria-pressed="true"] {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.chip-toggle[aria-pressed="true"] .n { color: rgba(255,255,255,.75); }

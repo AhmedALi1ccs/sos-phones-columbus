@@ -1,6 +1,8 @@
 import {
-  db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml, propertyHref, mountWho
+  db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml,
+  propertyHref, mountWho, toast
 } from "./db.js";
+import { exportCsv } from "./export.js";
 
 const PAGE = 25;
 
@@ -18,12 +20,16 @@ const FIELDS = {
               hint: "Parcel number. The “F# ” prefix is optional, and a fragment works.", min: 2 }
 };
 
-const qEl       = document.getElementById("q");
-const fieldEl   = document.getElementById("field");
-const hintEl    = document.getElementById("hint");
-const statusEl  = document.getElementById("status");
-const resultsEl = document.getElementById("results");
-const moreEl    = document.getElementById("more");
+const qEl        = document.getElementById("q");
+const fieldEl    = document.getElementById("field");
+const hintEl     = document.getElementById("hint");
+const statusEl   = document.getElementById("status");
+const resultsEl  = document.getElementById("results");
+const moreEl     = document.getElementById("more");
+const chipsEl    = document.getElementById("distressChips");
+const countEl    = document.getElementById("filterCount");
+const clearBtn   = document.getElementById("clearFilters");
+const exportBtn  = document.getElementById("exportBtn");
 
 mountWho(document.getElementById("whoHost"));
 
@@ -33,10 +39,16 @@ function setStatus(html, isHtml = false) {
   statusEl.hidden = !html;
 }
 
-let seq = 0;          // guards against out-of-order responses
+let seq = 0;                       // guards against out-of-order search responses
+let countSeq = 0;                  // ...and a separate one for the count, so the
+                                   // search firing next does not cancel it
 let offset = 0;
 let currentQuery = "";
 let currentField = "all";
+let selected = new Set();          // distress keys
+let filteredTotal = null;          // only known when no text query is involved
+
+const keys = () => [...selected];
 
 function applyField(f) {
   currentField = FIELDS[f] ? f : "all";
@@ -45,12 +57,66 @@ function applyField(f) {
   hintEl.textContent = FIELDS[currentField].hint;
 }
 
-function idleText() {
-  return currentField === "folio"
-    ? "Type a parcel number to search."
-    : "Start typing to search 285,947 properties.";
+function termIsUsable() {
+  return qEl.value.trim().length >= FIELDS[currentField].min;
+}
+function hasCriteria() {
+  return termIsUsable() || selected.size > 0;
 }
 
+function idleText() {
+  if (selected.size) return "";
+  return currentField === "folio"
+    ? "Type a parcel number, or pick a distress reason below."
+    : "Start typing, or pick a distress reason below, to search 285,947 properties.";
+}
+
+/* ----------------------------- distress chips ----------------------------- */
+async function loadDistresses() {
+  const { data, error } = await db.rpc("list_distresses");
+  if (error) {
+    chipsEl.innerHTML = `<span class="hint">Could not load distress reasons: ${esc(error.message)}</span>`;
+    return;
+  }
+  chipsEl.innerHTML = data.map((d) => `
+    <button type="button" class="chip-toggle" data-key="${esc(d.key)}"
+            aria-pressed="${selected.has(d.key)}">
+      ${esc(d.label)} <span class="n">${Number(d.n_properties).toLocaleString()}</span>
+    </button>`).join("");
+
+  chipsEl.querySelectorAll(".chip-toggle").forEach((b) =>
+    b.addEventListener("click", () => {
+      const k = b.dataset.key;
+      if (selected.has(k)) selected.delete(k); else selected.add(k);
+      b.setAttribute("aria-pressed", String(selected.has(k)));
+      onCriteriaChanged();
+    }));
+}
+
+async function refreshFilterCount() {
+  filteredTotal = null;
+  countEl.textContent = "";
+  if (!selected.size) return;
+
+  // count_by_distress ignores the text query, so only show it when there isn't one
+  if (termIsUsable()) { countEl.textContent = "+ search"; return; }
+
+  const mine = ++countSeq;
+  const { data, error } = await db.rpc("count_by_distress", { p_lists: keys() });
+  if (error || mine !== countSeq) return;
+  filteredTotal = Number(data);
+  countEl.textContent = `${filteredTotal.toLocaleString()} record${filteredTotal === 1 ? "" : "s"}`;
+}
+
+function refreshControls() {
+  clearBtn.hidden = selected.size === 0;
+  exportBtn.disabled = !hasCriteria();
+  exportBtn.textContent = filteredTotal !== null
+    ? `Export ${filteredTotal.toLocaleString()}`
+    : "Export CSV";
+}
+
+/* -------------------------------- results -------------------------------- */
 function resultHtml(r) {
   const addr = clean(r.property_address) || "(no property address)";
   const lists = splitList(r.lists);
@@ -75,7 +141,7 @@ function resultHtml(r) {
     </a>`;
 }
 
-async function runSearch(term, append = false) {
+async function runSearch(append = false) {
   const mine = ++seq;
   if (!append) {
     offset = 0;
@@ -85,7 +151,11 @@ async function runSearch(term, append = false) {
   }
 
   const { data, error } = await db.rpc("search_properties", {
-    q: term, max_rows: PAGE + 1, skip: offset, field: currentField
+    q: currentQuery || null,
+    max_rows: PAGE + 1,
+    skip: offset,
+    field: currentField,
+    p_lists: selected.size ? keys() : null
   });
 
   if (mine !== seq) return;                       // a newer search already fired
@@ -99,7 +169,9 @@ async function runSearch(term, append = false) {
   const rows = hasMore ? data.slice(0, PAGE) : data;
 
   if (!append && rows.length === 0) {
-    setStatus(`No matches for “${term}” in ${fieldEl.options[fieldEl.selectedIndex].text.toLowerCase()}.`);
+    setStatus(currentQuery
+      ? `No matches for “${currentQuery}”${selected.size ? " with those distress reasons" : ""}.`
+      : "No records carry all of those distress reasons.");
     return;
   }
 
@@ -109,66 +181,96 @@ async function runSearch(term, append = false) {
 
   moreEl.innerHTML = hasMore
     ? `<button class="btn ghost" id="moreBtn">Load more</button>`
-    : `<p class="hint">${offset} result${offset === 1 ? "" : "s"}.</p>`;
+    : `<p class="hint">${offset.toLocaleString()} result${offset === 1 ? "" : "s"}.</p>`;
 
   const btn = document.getElementById("moreBtn");
   if (btn) btn.addEventListener("click", () => {
     btn.disabled = true;
-    runSearch(currentQuery, true);
+    runSearch(true);
   });
 }
 
-function syncUrl(term) {
+function syncUrl() {
   const url = new URL(location.href);
+  const term = qEl.value.trim();
   if (term) url.searchParams.set("q", term); else url.searchParams.delete("q");
   if (currentField !== "all") url.searchParams.set("f", currentField); else url.searchParams.delete("f");
+  if (selected.size) url.searchParams.set("d", keys().join("|")); else url.searchParams.delete("d");
   history.replaceState(null, "", url);
 }
 
-function search() {
-  const term = qEl.value.trim();
-  syncUrl(term);
+function onCriteriaChanged() {
+  syncUrl();
+  refreshFilterCount().then(refreshControls);
+  refreshControls();
 
+  const term = qEl.value.trim();
   const min = FIELDS[currentField].min;
-  if (term.length < min) {
+
+  if (!hasCriteria()) {
     seq++;                                        // cancel any in-flight response
     resultsEl.innerHTML = "";
     moreEl.innerHTML = "";
     setStatus(term.length ? `Keep typing — at least ${min} characters.` : idleText());
     return;
   }
-  currentQuery = term;
-  runSearch(term);
+  currentQuery = termIsUsable() ? term : "";
+  runSearch();
 }
 
 let debounce;
 qEl.addEventListener("input", () => {
   clearTimeout(debounce);
-  debounce = setTimeout(search, 280);
+  debounce = setTimeout(onCriteriaChanged, 280);
 });
 
 fieldEl.addEventListener("change", () => {
   applyField(fieldEl.value);
   clearTimeout(debounce);
-  search();                                       // re-run immediately, no debounce
+  onCriteriaChanged();
   qEl.focus();
 });
 
-// restore from the URL (back button, shared link)
+clearBtn.addEventListener("click", () => {
+  selected.clear();
+  chipsEl.querySelectorAll(".chip-toggle").forEach((b) => b.setAttribute("aria-pressed", "false"));
+  onCriteriaChanged();
+});
+
+exportBtn.addEventListener("click", async () => {
+  const label = exportBtn.textContent;
+  exportBtn.disabled = true;
+  const res = await exportCsv({
+    query: currentQuery,
+    field: currentField,
+    keys: keys(),
+    onProgress: (n) => { exportBtn.textContent = `Exporting… ${n.toLocaleString()}`; }
+  });
+  exportBtn.textContent = label;
+  exportBtn.disabled = false;
+  if (res) {
+    toast(res.hitCap
+      ? `Exported the first ${res.count.toLocaleString()} records (limit reached)`
+      : `Exported ${res.count.toLocaleString()} records`);
+  }
+});
+
+/* ------------------------------ start-up ------------------------------ */
 const params = new URLSearchParams(location.search);
 applyField(params.get("f") || "all");
+(params.get("d") || "").split("|").filter(Boolean).forEach((k) => selected.add(k));
 
 if (!configured) {
   configBanner(document.getElementById("banner"));
   qEl.disabled = true;
   fieldEl.disabled = true;
+  exportBtn.disabled = true;
+  chipsEl.innerHTML = "";
   setStatus("");
 } else {
+  loadDistresses();
   const initial = params.get("q");
-  if (initial) {
-    qEl.value = initial;
-    search();
-  } else {
-    setStatus(idleText());
-  }
+  if (initial) qEl.value = initial;
+  if (initial || selected.size) onCriteriaChanged();
+  else { setStatus(idleText()); refreshControls(); }
 }

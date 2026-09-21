@@ -96,4 +96,28 @@ drop trigger if exists property_phones_cap on public.property_phones;
 create trigger property_phones_cap before insert on public.property_phones
   for each row execute function public.tg_phone_cap();
 
+-- ---------------------------------------------------------------
+-- 3. Distress reasons.  "Lists" is a comma separated string whose values
+--    arrive in several spellings (HIGH EQUITY / High equity / High Equity,
+--    Tax Delinquent / Tax Del).  These fold them to one key per reason.
+-- ---------------------------------------------------------------
+create or replace function public.distress_norm(v text) returns text
+  language sql immutable parallel safe as
+$$ select case btrim(lower(regexp_replace(coalesce(v,''), '[^A-Za-z0-9]+', ' ', 'g')))
+            when 'tax del' then 'tax delinquent'
+            when ''        then null
+            else btrim(lower(regexp_replace(coalesce(v,''), '[^A-Za-z0-9]+', ' ', 'g')))
+          end $$;
+
+create or replace function public.distress_keys(lists text) returns text[]
+  language sql immutable parallel safe as
+$$ select coalesce(array_agg(distinct k), '{}'::text[])
+   from (select public.distress_norm(v) as k
+         from unnest(string_to_array(coalesce(lists,''), ',')) v) t
+   where k is not null $$;
+
+-- containment index, so "show me every PROBATE + HIGH EQUITY record" is indexed
+create index if not exists buybox_lists_gin
+  on public."BuyBox" using gin (public.distress_keys("Lists"));
+
 commit;
