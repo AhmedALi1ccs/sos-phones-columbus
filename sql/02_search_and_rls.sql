@@ -4,24 +4,129 @@ begin;
 drop function if exists public.search_properties(text, int, int);
 drop function if exists public.search_properties(text, int, int, text);
 drop function if exists public.search_properties(text, int, int, text, text[]);
+drop function if exists public.count_by_distress(text[]);
+drop function if exists public.count_properties(text, text, text[]);
+drop function if exists public.properties_where(text, text, text[]);
+drop function if exists public.search_tokens(text);
 drop function if exists public.list_distresses();
 drop function if exists public.refresh_distress_vocab();
 drop function if exists public.export_properties(text, text, text[], int, int);
-drop function if exists public.count_by_distress(text[]);
 drop function if exists public.get_property(text, text);
 drop function if exists public.get_mail_history(text);
 
 -- ---------------------------------------------------------------
--- search_properties(q, max_rows, skip, field)
+-- search_tokens() : what the person typed, folded to the words the
+-- data actually stores (it abbreviates street suffixes).
+-- ---------------------------------------------------------------
+create function public.search_tokens(q text)
+returns text[]
+language plpgsql
+immutable
+as $fn$
+declare
+  abbrev constant text[][] := array[
+    ['street','st'],['avenue','ave'],['drive','dr'],['road','rd'],['lane','ln'],
+    ['court','ct'],['circle','cir'],['boulevard','blvd'],['place','pl'],['terrace','ter'],
+    ['parkway','pkwy'],['highway','hwy'],['trail','trl'],['square','sq'],['apartment','apt'],
+    ['north','n'],['south','s'],['east','e'],['west','w'],
+    ['northeast','ne'],['northwest','nw'],['southeast','se'],['southwest','sw']
+  ];
+  norm text;
+  a    text[];
+begin
+  norm := btrim(regexp_replace(lower(coalesce(q, '')), '[^a-z0-9]+', ' ', 'g'));
+  if norm = '' then
+    return '{}'::text[];
+  end if;
+  foreach a slice 1 in array abbrev loop
+    norm := regexp_replace(norm, '\m' || a[1] || '\M', a[2], 'g');
+  end loop;
+  return regexp_split_to_array(norm, '\s+');
+end
+$fn$;
+
+-- ---------------------------------------------------------------
+-- properties_where() : the filter, as a SQL fragment over "BuyBox b".
+-- search_properties() and count_properties() both build on this, so a
+-- page of results and its total can never disagree about the filter.
+-- ---------------------------------------------------------------
+create function public.properties_where(
+  q       text,
+  field   text   default 'all',
+  p_lists text[] default null
+)
+returns text
+language plpgsql
+immutable
+as $fn$
+declare
+  -- the whole record in one string: the expression the trigram index is built on
+  blob_all constant text :=
+    $$lower(coalesce(b."Full Name",'')||' '||coalesce(b."First Name",'')||' '||coalesce(b."Last Name",'')||' '||
+      coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property state",'')||' '||coalesce(b."Property zip",'')||' '||
+      coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing state",'')||' '||coalesce(b."Mailing zip",''))$$;
+  blob_prop constant text :=
+    $$lower(coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property state",'')||' '||coalesce(b."Property zip",''))$$;
+  blob_name constant text :=
+    $$lower(coalesce(b."Full Name",'')||' '||coalesce(b."First Name",'')||' '||coalesce(b."Last Name",''))$$;
+  blob_mail constant text :=
+    $$lower(coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing state",'')||' '||coalesce(b."Mailing zip",''))$$;
+
+  fld   text := lower(coalesce(field, 'all'));
+  w     text := '';
+  scope text;
+  toks  text[];
+  t     text;
+  fkey  text;
+begin
+  if p_lists is not null and array_length(p_lists, 1) > 0 then
+    w := w || format(' and public.distress_keys(b."Lists") @> %L::text[]', p_lists);
+  end if;
+
+  -- a FOLIO is a parcel number, not prose: match the normalised form
+  if fld = 'folio' then
+    fkey := public.folio_norm(q);
+    if fkey is not null and length(fkey) >= 2 then
+      w := w || format(' and public.folio_norm(b."FOLIO") like %L', '%' || fkey || '%');
+    end if;
+    return w;
+  end if;
+
+  scope := case fld
+             when 'property' then blob_prop
+             when 'name'     then blob_name
+             when 'mailing'  then blob_mail
+             else null
+           end;
+
+  foreach t in array public.search_tokens(q) loop
+    if t <> '' then
+      -- blob_all is the indexed expression, so it always carries the search;
+      -- the scoped blob then narrows the result to the chosen field.
+      w := w || format(' and %s like %L', blob_all, '%' || t || '%');
+      if scope is not null then
+        w := w || format(' and %s like %L', scope, '%' || t || '%');
+      end if;
+    end if;
+  end loop;
+
+  return w;
+end
+$fn$;
+
+-- ---------------------------------------------------------------
+-- search_properties() : one page of results.
 --   field = all | property | name | mailing | folio
--- Partial, multi-token, case-insensitive.  Every token must appear.
+--   p_lists = distress keys; a record must carry them all
+-- With no query and no filter this browses everything, heaviest
+-- "list stack" (number of distress reasons) first.
 -- ---------------------------------------------------------------
 create function public.search_properties(
   q         text,
-  max_rows  int    default 50,
+  max_rows  int    default 15,
   skip      int    default 0,
   field     text   default 'all',
-  p_lists   text[] default null      -- distress keys; a record must carry them all
+  p_lists   text[] default null
 )
 returns table (
   id               bigint,
@@ -39,141 +144,114 @@ returns table (
   mailing_state    text,
   mailing_zip      text,
   lists            text,
+  list_stack       int,
   phone_count      bigint
 )
 language plpgsql
 stable
 as $fn$
 declare
-  -- everything in one string: this is the expression the trigram index is built on
-  blob_all constant text :=
-    $$lower(coalesce(b."Full Name",'')||' '||coalesce(b."First Name",'')||' '||coalesce(b."Last Name",'')||' '||
-      coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property state",'')||' '||coalesce(b."Property zip",'')||' '||
-      coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing state",'')||' '||coalesce(b."Mailing zip",''))$$;
   blob_prop constant text :=
-    $$lower(coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property state",'')||' '||coalesce(b."Property zip",''))$$;
-  blob_name constant text :=
-    $$lower(coalesce(b."Full Name",'')||' '||coalesce(b."First Name",'')||' '||coalesce(b."Last Name",''))$$;
+    $$lower(coalesce(b."Property address",'')||' '||coalesce(b."Property city",'')||' '||coalesce(b."Property zip",''))$$;
+  blob_name constant text := $$lower(coalesce(b."Full Name",''))$$;
   blob_mail constant text :=
-    $$lower(coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing state",'')||' '||coalesce(b."Mailing zip",''))$$;
+    $$lower(coalesce(b."Mailing address",'')||' '||coalesce(b."Mailing city",'')||' '||coalesce(b."Mailing zip",''))$$;
 
   cols constant text :=
     $$b.id, b."FOLIO", b."Property county", b."Full Name", b."First Name", b."Last Name",
       b."Property address", b."Property city", b."Property state", b."Property zip",
       b."Mailing address", b."Mailing city", b."Mailing state", b."Mailing zip",
-      b."Lists",
+      b."Lists", public.list_stack(b."Lists"),
       (select count(*) from public.property_phones p
         where p.folio_key  = public.folio_norm(b."FOLIO")
           and p.county_key = public.county_norm(b."Property county"))$$;
 
-  -- the data stores addresses abbreviated; fold what people actually type
-  abbrev constant text[][] := array[
-    ['street','st'],['avenue','ave'],['drive','dr'],['road','rd'],['lane','ln'],
-    ['court','ct'],['circle','cir'],['boulevard','blvd'],['place','pl'],['terrace','ter'],
-    ['parkway','pkwy'],['highway','hwy'],['trail','trl'],['square','sq'],['apartment','apt'],
-    ['north','n'],['south','s'],['east','e'],['west','w'],
-    ['northeast','ne'],['northwest','nw'],['southeast','se'],['southwest','sw']
-  ];
-
   fld        text := lower(coalesce(field, 'all'));
-  scope      text;
-  norm       text;
-  fkey       text;
-  toks       text[];
-  t          text;
-  a          text[];
-  wheres     text := '';
+  toks       text[] := public.search_tokens(q);
   -- '0::int' not '0': a bare integer in ORDER BY is read as a column position
   addr_score text := '0::int';
   name_score text := '0::int';
   mail_score text := '0::int';
-  sql        text;
-  lim        int  := greatest(1, least(coalesce(max_rows, 50), 5000));
+  t          text;
+  order_sql  text;
+  lim        int  := greatest(1, least(coalesce(max_rows, 15), 5000));
   off        int  := greatest(0, coalesce(skip, 0));
-  has_lists  bool := p_lists is not null and array_length(p_lists, 1) > 0;
-  list_where text := '';
 begin
-  if has_lists then
-    list_where := format(' and public.distress_keys(b."Lists") @> %L::text[]', p_lists);
-  end if;
-  -- ---- a FOLIO is a parcel number, not prose: match the normalised form ----
   if fld = 'folio' then
-    fkey := public.folio_norm(q);
-    if fkey is null or length(fkey) < 2 then
-      return;
-    end if;
-    return query execute format($q$
-      select %s
-      from public."BuyBox" b
-      where public.folio_norm(b."FOLIO") like %L %s
-      order by (public.folio_norm(b."FOLIO") = %L) desc,
-               (public.folio_norm(b."FOLIO") like %L) desc,
-               b."Property address" nulls last, b.id
-      limit %s offset %s
-    $q$, cols, '%' || fkey || '%', list_where, fkey, fkey || '%', lim, off);
-    return;
-  end if;
+    -- exact parcel first, then prefix, then the rest
+    order_sql := format(
+      '(public.folio_norm(b."FOLIO") = %L) desc, (public.folio_norm(b."FOLIO") like %L) desc,
+       public.list_stack(b."Lists") desc, b.id',
+      public.folio_norm(q), coalesce(public.folio_norm(q), '') || '%');
 
-  scope := case fld
-             when 'property' then blob_prop
-             when 'name'     then blob_name
-             when 'mailing'  then blob_mail
-             else null
-           end;
-
-  norm := lower(coalesce(q, ''));
-  norm := regexp_replace(norm, '[^a-z0-9]+', ' ', 'g');
-  norm := btrim(norm);
-  if norm = '' and not has_lists then
-    return;                 -- nothing to search and nothing to filter by
-  end if;
-
-  foreach a slice 1 in array abbrev loop
-    norm := regexp_replace(norm, '\m' || a[1] || '\M', a[2], 'g');
-  end loop;
-
-  toks := regexp_split_to_array(norm, '\s+');
-
-  foreach t in array toks loop
-    if t <> '' then
-      -- blob_all is the indexed expression, so it always carries the search;
-      -- the scoped blob then narrows the result to the chosen field.
-      wheres := wheres || format(' and %s like %L', blob_all, '%' || t || '%');
-      if scope is not null then
-        wheres := wheres || format(' and %s like %L', scope, '%' || t || '%');
+  elsif cardinality(toks) > 0 then
+    foreach t in array toks loop
+      if t <> '' then
+        addr_score := addr_score || format(' + (case when %s like %L then 1 else 0 end)', blob_prop, '%' || t || '%');
+        name_score := name_score || format(' + (case when %s like %L then 1 else 0 end)', blob_name, '%' || t || '%');
+        mail_score := mail_score || format(' + (case when %s like %L then 1 else 0 end)', blob_mail, '%' || t || '%');
       end if;
-      -- relevance: how many tokens land in the address vs the owner name
-      addr_score := addr_score || format(' + (case when %s like %L then 1 else 0 end)', blob_prop, '%' || t || '%');
-      name_score := name_score || format(' + (case when %s like %L then 1 else 0 end)', blob_name, '%' || t || '%');
-      mail_score := mail_score || format(' + (case when %s like %L then 1 else 0 end)', blob_mail, '%' || t || '%');
-    end if;
-  end loop;
+    end loop;
+    -- best match first; the list stack breaks ties
+    order_sql := format(
+      'greatest(%s, %s, %s) desc, (%s) desc, (lower(coalesce(b."Property address",'''')) like %L) desc,
+       public.list_stack(b."Lists") desc, b."Property address" nulls last, b.id',
+      addr_score, name_score, mail_score,
+      case fld when 'name' then name_score when 'mailing' then mail_score else addr_score end,
+      array_to_string(toks, '%') || '%');
 
-  sql := format($q$
-    select %s
-    from public."BuyBox" b
-    where true %s %s
-    order by greatest(%s, %s, %s) desc,
-             (%s) desc,
-             (lower(coalesce(b."Property address",'')) like %L) desc,
-             b."Property address" nulls last, b.id
-    limit %s offset %s
-  $q$, cols, wheres, list_where,
-       addr_score, name_score, mail_score,
-       case fld when 'name' then name_score when 'mailing' then mail_score else addr_score end,
-       replace(norm, ' ', '%') || '%',
-       lim, off);
+  else
+    -- nothing typed: the heaviest stack is the most interesting record.
+    -- Matches buybox_stack_idx, so this is an index scan, not a 286k sort.
+    order_sql := 'public.list_stack(b."Lists") desc, b.id';
+  end if;
 
-  return query execute sql;
+  -- Page the ids first, then fetch the columns for just those rows.
+  -- The phone-count subquery in the target list is evaluated once per row the
+  -- executor produces, so selecting it before OFFSET means ~150k needless
+  -- counts on a deep page (9s); this way it runs `lim` times.
+  return query execute format(
+    'with page as (
+       select b.id from public."BuyBox" b where true %s order by %s limit %s offset %s
+     )
+     select %s from public."BuyBox" b join page on page.id = b.id order by %s',
+    public.properties_where(q, field, p_lists), order_sql, lim, off,
+    cols, order_sql);
 end
 $fn$;
 
 -- ---------------------------------------------------------------
--- list_distresses() : the distress vocabulary, folded to one row per
--- reason, labelled with the spelling that appears most often, and counted.
+-- count_properties() : the exact size of that result set, for paging.
+-- The no-filter branch is kept separate on purpose: folded into one
+-- query with OR, the predicate stops being indexable.
 -- ---------------------------------------------------------------
--- The scan behind this costs ~11s on 286k rows, so it is materialised.
--- It only changes when BuyBox is reloaded: run refresh_distress_vocab() then.
+create function public.count_properties(
+  q       text   default null,
+  field   text   default 'all',
+  p_lists text[] default null
+)
+returns bigint
+language plpgsql
+stable
+as $fn$
+declare
+  w text := public.properties_where(q, field, p_lists);
+  n bigint;
+begin
+  if w = '' then
+    select count(*) into n from public."BuyBox";
+  else
+    execute format('select count(*) from public."BuyBox" b where true %s', w) into n;
+  end if;
+  return n;
+end
+$fn$;
+
+-- ---------------------------------------------------------------
+-- The distress vocabulary.  The scan behind it costs ~11s on 286k rows,
+-- so it is materialised; it only changes when BuyBox is reloaded, and
+-- refresh_distress_vocab() is how you catch it up.
+-- ---------------------------------------------------------------
 drop materialized view if exists public.distress_vocab cascade;
 create materialized view public.distress_vocab as
   select public.distress_norm(v)                 as key,
@@ -186,7 +264,7 @@ create materialized view public.distress_vocab as
 
 create unique index distress_vocab_key on public.distress_vocab (key);
 
-create or replace function public.refresh_distress_vocab() returns void
+create function public.refresh_distress_vocab() returns void
   language sql security definer as
 $$ refresh materialized view concurrently public.distress_vocab $$;
 
@@ -199,32 +277,8 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------
--- count_by_distress() : how many records carry ALL of these reasons.
--- Answered straight from the containment index, so it stays cheap even
--- for the large lists.
--- ---------------------------------------------------------------
--- The branches are kept apart on purpose: written as one query with
--- "p_lists is null or ... @> p_lists", the OR makes the predicate
--- unindexable and the count degrades to a 286k-row scan (~12s per call).
-create function public.count_by_distress(p_lists text[])
-returns bigint
-language plpgsql
-stable
-as $$
-declare n bigint;
-begin
-  if p_lists is null or array_length(p_lists, 1) is null then
-    select count(*) into n from public."BuyBox";
-  else
-    select count(*) into n from public."BuyBox" b
-     where public.distress_keys(b."Lists") @> p_lists;
-  end if;
-  return n;
-end $$;
-
--- ---------------------------------------------------------------
--- export_properties() : the same filter as the search box, plus each
--- property's phone numbers, for building a CSV.  Paged by the caller.
+-- export_properties() : the same filter and order as the page, plus
+-- each property's phone numbers, for building a CSV.
 -- ---------------------------------------------------------------
 create function public.export_properties(
   q        text   default null,
@@ -248,6 +302,7 @@ returns table (
   mailing_state    text,
   mailing_zip      text,
   distress_lists   text,
+  list_stack       int,
   phones           jsonb
 )
 language sql
@@ -256,7 +311,7 @@ as $$
   select s.folio, s.county, s.full_name, s.first_name, s.last_name,
          s.property_address, s.property_city, s.property_state, s.property_zip,
          s.mailing_address, s.mailing_city, s.mailing_state, s.mailing_zip,
-         s.lists,
+         s.lists, s.list_stack,
          coalesce(ph.j, '[]'::jsonb)
   from public.search_properties(q, max_rows, skip, field, p_lists) s
   left join lateral (
@@ -315,8 +370,7 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------
--- get_mail_history(folio) : rows from Mailed for the same parcel,
--- compared on the normalised folio rather than the raw string.
+-- get_mail_history(folio) : rows from Mailed for the same parcel.
 -- ---------------------------------------------------------------
 create function public.get_mail_history(p_folio text)
 returns table (folio text, check_no text, mail_type text, property_address text)
@@ -332,7 +386,6 @@ $$;
 -- ---------------------------------------------------------------
 -- Row level security : this site is intentionally open to anyone
 -- with the link (read BuyBox/Mailed, read+write phone rows).
--- BuyBox and Mailed stay read-only from the browser.
 -- ---------------------------------------------------------------
 alter table public."BuyBox"          enable row level security;
 alter table public."Mailed"          enable row level security;
@@ -353,21 +406,22 @@ create policy phones_insert on public.property_phones for insert to anon, authen
 create policy phones_update on public.property_phones for update to anon, authenticated using (true) with check (true);
 create policy phones_delete on public.property_phones for delete to anon, authenticated using (true);
 
--- BuyBox / Mailed: revoke the write grants so the open anon key can only read them
 revoke insert, update, delete, truncate on public."BuyBox", public."Mailed" from anon, authenticated;
-grant  select on public."BuyBox", public."Mailed" to anon, authenticated;
+grant  select on public."BuyBox", public."Mailed", public.distress_vocab to anon, authenticated;
 grant  select, insert, update, delete on public.property_phones to anon, authenticated;
 grant  usage on all sequences in schema public to anon, authenticated;
-grant  execute on function public.search_properties(text, int, int, text, text[]) to anon, authenticated;
-grant  select   on public.distress_vocab                                  to anon, authenticated;
-grant  execute on function public.list_distresses()                       to anon, authenticated;
-grant  execute on function public.export_properties(text, text, text[], int, int) to anon, authenticated;
-grant  execute on function public.count_by_distress(text[])               to anon, authenticated;
-grant  execute on function public.distress_norm(text)                     to anon, authenticated;
-grant  execute on function public.distress_keys(text)                     to anon, authenticated;
-grant  execute on function public.get_property(text, text)                to anon, authenticated;
-grant  execute on function public.get_mail_history(text)                  to anon, authenticated;
-grant  execute on function public.folio_norm(text)                        to anon, authenticated;
-grant  execute on function public.county_norm(text)                       to anon, authenticated;
+grant  execute on function public.search_properties(text, int, int, text, text[])  to anon, authenticated;
+grant  execute on function public.count_properties(text, text, text[])             to anon, authenticated;
+grant  execute on function public.properties_where(text, text, text[])             to anon, authenticated;
+grant  execute on function public.search_tokens(text)                              to anon, authenticated;
+grant  execute on function public.list_distresses()                                to anon, authenticated;
+grant  execute on function public.export_properties(text, text, text[], int, int)  to anon, authenticated;
+grant  execute on function public.get_property(text, text)                         to anon, authenticated;
+grant  execute on function public.get_mail_history(text)                           to anon, authenticated;
+grant  execute on function public.folio_norm(text)                                 to anon, authenticated;
+grant  execute on function public.county_norm(text)                                to anon, authenticated;
+grant  execute on function public.distress_norm(text)                              to anon, authenticated;
+grant  execute on function public.distress_keys(text)                              to anon, authenticated;
+grant  execute on function public.list_stack(text)                                 to anon, authenticated;
 
 commit;

@@ -1,7 +1,8 @@
 import { db, clean, splitList, toast } from "./db.js";
 
 const PAGE_SIZE = 1000;
-const CAP = 50000;        // a browser-built CSV has to stay in memory
+export const EXPORT_CAP = 50000;   // a browser-built CSV has to stay in memory
+const CAP = EXPORT_CAP;
 const MAX_PHONE_COLS = 30;
 
 const csvCell = (v) => {

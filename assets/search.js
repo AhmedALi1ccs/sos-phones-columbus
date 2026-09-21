@@ -2,9 +2,9 @@ import {
   db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml,
   propertyHref, mountWho, toast
 } from "./db.js";
-import { exportCsv } from "./export.js";
+import { exportCsv, EXPORT_CAP } from "./export.js";
 
-const PAGE = 25;
+const PER_PAGE = 15;
 
 /** What each field means to the person typing, and how short a query may be. */
 const FIELDS = {
@@ -20,55 +20,42 @@ const FIELDS = {
               hint: "Parcel number. The “F# ” prefix is optional, and a fragment works.", min: 2 }
 };
 
-const qEl        = document.getElementById("q");
-const fieldEl    = document.getElementById("field");
-const hintEl     = document.getElementById("hint");
-const statusEl   = document.getElementById("status");
-const resultsEl  = document.getElementById("results");
-const moreEl     = document.getElementById("more");
-const chipsEl    = document.getElementById("distressChips");
-const countEl    = document.getElementById("filterCount");
-const clearBtn   = document.getElementById("clearFilters");
-const exportBtn  = document.getElementById("exportBtn");
+const qEl       = document.getElementById("q");
+const fieldEl   = document.getElementById("field");
+const hintEl    = document.getElementById("hint");
+const summaryEl = document.getElementById("summary");
+const statusEl  = document.getElementById("status");
+const resultsEl = document.getElementById("results");
+const pagerEl   = document.getElementById("pager");
+const chipsEl   = document.getElementById("distressChips");
+const countEl   = document.getElementById("filterCount");
+const clearBtn  = document.getElementById("clearFilters");
+const exportBtn = document.getElementById("exportBtn");
 
 mountWho(document.getElementById("whoHost"));
 
-/** The status line collapses when empty, instead of leaving a gap above the results. */
 function setStatus(html, isHtml = false) {
   if (isHtml) statusEl.innerHTML = html; else statusEl.textContent = html || "";
   statusEl.hidden = !html;
 }
 
-let seq = 0;                       // guards against out-of-order search responses
-let countSeq = 0;                  // ...and a separate one for the count, so the
-                                   // search firing next does not cancel it
-let offset = 0;
+let pageSeq  = 0;        // guards against out-of-order page responses
+let countSeq = 0;        // ...and a separate one for the total, so one cannot cancel the other
+let page = 0;            // zero-based
+let total = null;
 let currentQuery = "";
 let currentField = "all";
-let selected = new Set();          // distress keys
-let filteredTotal = null;          // only known when no text query is involved
+let selected = new Set();
 
 const keys = () => [...selected];
+const termIsUsable = () => qEl.value.trim().length >= FIELDS[currentField].min;
+const totalPages = () => (total === null ? null : Math.max(1, Math.ceil(total / PER_PAGE)));
 
 function applyField(f) {
   currentField = FIELDS[f] ? f : "all";
   fieldEl.value = currentField;
   qEl.placeholder = FIELDS[currentField].placeholder;
   hintEl.textContent = FIELDS[currentField].hint;
-}
-
-function termIsUsable() {
-  return qEl.value.trim().length >= FIELDS[currentField].min;
-}
-function hasCriteria() {
-  return termIsUsable() || selected.size > 0;
-}
-
-function idleText() {
-  if (selected.size) return "";
-  return currentField === "folio"
-    ? "Type a parcel number, or pick a distress reason below."
-    : "Start typing, or pick a distress reason below, to search 285,947 properties.";
 }
 
 /* ----------------------------- distress chips ----------------------------- */
@@ -93,34 +80,12 @@ async function loadDistresses() {
     }));
 }
 
-async function refreshFilterCount() {
-  filteredTotal = null;
-  countEl.textContent = "";
-  if (!selected.size) return;
-
-  // count_by_distress ignores the text query, so only show it when there isn't one
-  if (termIsUsable()) { countEl.textContent = "+ search"; return; }
-
-  const mine = ++countSeq;
-  const { data, error } = await db.rpc("count_by_distress", { p_lists: keys() });
-  if (error || mine !== countSeq) return;
-  filteredTotal = Number(data);
-  countEl.textContent = `${filteredTotal.toLocaleString()} record${filteredTotal === 1 ? "" : "s"}`;
-}
-
-function refreshControls() {
-  clearBtn.hidden = selected.size === 0;
-  exportBtn.disabled = !hasCriteria();
-  exportBtn.textContent = filteredTotal !== null
-    ? `Export ${filteredTotal.toLocaleString()}`
-    : "Export CSV";
-}
-
 /* -------------------------------- results -------------------------------- */
 function resultHtml(r) {
   const addr = clean(r.property_address) || "(no property address)";
   const lists = splitList(r.lists);
   const phones = Number(r.phone_count) || 0;
+  const stack = Number(r.list_stack) || 0;
   return `
     <a class="result" href="${propertyHref(r)}">
       <span class="line1">
@@ -134,6 +99,7 @@ function resultHtml(r) {
         ${clean(r.folio) ? `&nbsp;·&nbsp; ${esc(clean(r.folio))}` : ""}
       </span>
       <span class="chips">
+        ${stack ? `<span class="chip stack" title="Distress reasons on this record">${stack}</span>` : ""}
         ${phones ? `<span class="chip tel">📞 ${phones}</span>` : ""}
         ${chipsHtml(lists.slice(0, 6))}
         ${lists.length > 6 ? `<span class="chip">+${lists.length - 6}</span>` : ""}
@@ -141,87 +107,165 @@ function resultHtml(r) {
     </a>`;
 }
 
-async function runSearch(append = false) {
-  const mine = ++seq;
-  if (!append) {
-    offset = 0;
-    resultsEl.innerHTML = "";
-    moreEl.innerHTML = "";
-    setStatus("Searching…");
-  }
+async function loadPage() {
+  const mine = ++pageSeq;
+  setStatus("Searching…");
 
   const { data, error } = await db.rpc("search_properties", {
     q: currentQuery || null,
-    max_rows: PAGE + 1,
-    skip: offset,
+    max_rows: PER_PAGE,
+    skip: page * PER_PAGE,
     field: currentField,
     p_lists: selected.size ? keys() : null
   });
 
-  if (mine !== seq) return;                       // a newer search already fired
+  if (mine !== pageSeq) return;                 // a newer request already fired
 
   if (error) {
     setStatus(`<span class="err" style="display:block">Search failed: ${esc(error.message)}</span>`, true);
+    resultsEl.innerHTML = "";
+    pagerEl.innerHTML = "";
     return;
   }
 
-  const hasMore = data.length > PAGE;
-  const rows = hasMore ? data.slice(0, PAGE) : data;
-
-  if (!append && rows.length === 0) {
+  if (data.length === 0) {
     setStatus(currentQuery
       ? `No matches for “${currentQuery}”${selected.size ? " with those distress reasons" : ""}.`
       : "No records carry all of those distress reasons.");
+    resultsEl.innerHTML = "";
+    pagerEl.innerHTML = "";
+    summaryEl.textContent = "";
     return;
   }
 
   setStatus("");
-  resultsEl.insertAdjacentHTML("beforeend", rows.map(resultHtml).join(""));
-  offset += rows.length;
-
-  moreEl.innerHTML = hasMore
-    ? `<button class="btn ghost" id="moreBtn">Load more</button>`
-    : `<p class="hint">${offset.toLocaleString()} result${offset === 1 ? "" : "s"}.</p>`;
-
-  const btn = document.getElementById("moreBtn");
-  if (btn) btn.addEventListener("click", () => {
-    btn.disabled = true;
-    runSearch(true);
-  });
+  resultsEl.innerHTML = data.map(resultHtml).join("");
+  renderSummary(data.length);
+  renderPager();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+async function loadTotal() {
+  const mine = ++countSeq;
+  total = null;
+  renderSummary();
+  renderPager();
+
+  const { data, error } = await db.rpc("count_properties", {
+    q: currentQuery || null,
+    field: currentField,
+    p_lists: selected.size ? keys() : null
+  });
+  if (error || mine !== countSeq) return;
+
+  total = Number(data);
+  countEl.textContent = selected.size ? `${total.toLocaleString()} record${total === 1 ? "" : "s"}` : "";
+
+  // the CSV is assembled in the browser, so say what will actually come out
+  const exportable = Math.min(total, EXPORT_CAP);
+  exportBtn.textContent = `Export ${exportable.toLocaleString()}`;
+  exportBtn.title = total > EXPORT_CAP
+    ? `${total.toLocaleString()} match, but an export is capped at ${EXPORT_CAP.toLocaleString()}. `
+      + `Narrow it with another distress reason or a search term.`
+    : "";
+  renderSummary();
+  renderPager();
+}
+
+function renderSummary(shown) {
+  const from = page * PER_PAGE + 1;
+  if (total === null) {
+    summaryEl.innerHTML = shown ? `Showing <b>${from.toLocaleString()}–${(from + shown - 1).toLocaleString()}</b>…` : "";
+    return;
+  }
+  const to = Math.min(total, from + PER_PAGE - 1);
+  const sortedBy = currentQuery ? "best match" : "most distress reasons";
+  summaryEl.innerHTML = total === 0 ? ""
+    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b>, sorted by ${sortedBy}.`;
+}
+
+/** 1 … 7 8 [9] 10 11 … 19,063 */
+function pageWindow(current, last) {
+  const out = new Set([0, last - 1]);
+  for (let i = current - 2; i <= current + 2; i++) if (i >= 0 && i < last) out.add(i);
+  return [...out].sort((a, b) => a - b);
+}
+
+function renderPager() {
+  const last = totalPages();
+  if (last === null || last <= 1) { pagerEl.innerHTML = ""; return; }
+
+  const btn = (label, target, opts = {}) =>
+    `<button type="button" data-page="${target}"
+       ${opts.disabled ? "disabled" : ""}
+       ${opts.current ? 'aria-current="page"' : ""}
+       ${opts.label ? `aria-label="${opts.label}"` : ""}>${label}</button>`;
+
+  let html = btn("«", 0, { disabled: page === 0, label: "First page" })
+           + btn("‹", page - 1, { disabled: page === 0, label: "Previous page" });
+
+  let prev = -1;
+  for (const i of pageWindow(page, last)) {
+    if (prev >= 0 && i > prev + 1) html += `<span class="gap">…</span>`;
+    html += btn((i + 1).toLocaleString(), i, { current: i === page });
+    prev = i;
+  }
+
+  html += btn("›", page + 1, { disabled: page >= last - 1, label: "Next page" })
+        + btn("»", last - 1, { disabled: page >= last - 1, label: "Last page" });
+
+  pagerEl.innerHTML = html;
+  pagerEl.querySelectorAll("button[data-page]").forEach((b) =>
+    b.addEventListener("click", () => goToPage(Number(b.dataset.page))));
+}
+
+function goToPage(n) {
+  const last = totalPages();
+  page = Math.max(0, last === null ? n : Math.min(n, last - 1));
+  syncUrl();
+  loadPage();
+}
+
+/* ------------------------------ criteria ------------------------------ */
 function syncUrl() {
   const url = new URL(location.href);
   const term = qEl.value.trim();
   if (term) url.searchParams.set("q", term); else url.searchParams.delete("q");
   if (currentField !== "all") url.searchParams.set("f", currentField); else url.searchParams.delete("f");
   if (selected.size) url.searchParams.set("d", keys().join("|")); else url.searchParams.delete("d");
+  if (page > 0) url.searchParams.set("p", page + 1); else url.searchParams.delete("p");
   history.replaceState(null, "", url);
 }
 
-function onCriteriaChanged() {
-  syncUrl();
-  refreshFilterCount().then(refreshControls);
-  refreshControls();
-
+function onCriteriaChanged(keepPage = false) {
   const term = qEl.value.trim();
   const min = FIELDS[currentField].min;
 
-  if (!hasCriteria()) {
-    seq++;                                        // cancel any in-flight response
+  // a term too short to search is treated as no term, not as an error
+  if (term.length && !termIsUsable()) {
+    setStatus(`Keep typing — at least ${min} characters.`);
     resultsEl.innerHTML = "";
-    moreEl.innerHTML = "";
-    setStatus(term.length ? `Keep typing — at least ${min} characters.` : idleText());
+    pagerEl.innerHTML = "";
+    summaryEl.textContent = "";
     return;
   }
+
   currentQuery = termIsUsable() ? term : "";
-  runSearch();
+  if (!keepPage) page = 0;
+  clearBtn.hidden = selected.size === 0;
+  exportBtn.disabled = false;
+  exportBtn.textContent = "Export CSV";
+  countEl.textContent = "";
+
+  syncUrl();
+  loadTotal();
+  loadPage();
 }
 
 let debounce;
 qEl.addEventListener("input", () => {
   clearTimeout(debounce);
-  debounce = setTimeout(onCriteriaChanged, 280);
+  debounce = setTimeout(() => onCriteriaChanged(), 280);
 });
 
 fieldEl.addEventListener("change", () => {
@@ -259,6 +303,8 @@ exportBtn.addEventListener("click", async () => {
 const params = new URLSearchParams(location.search);
 applyField(params.get("f") || "all");
 (params.get("d") || "").split("|").filter(Boolean).forEach((k) => selected.add(k));
+page = Math.max(0, (parseInt(params.get("p"), 10) || 1) - 1);
+if (params.get("q")) qEl.value = params.get("q");
 
 if (!configured) {
   configBanner(document.getElementById("banner"));
@@ -266,11 +312,7 @@ if (!configured) {
   fieldEl.disabled = true;
   exportBtn.disabled = true;
   chipsEl.innerHTML = "";
-  setStatus("");
 } else {
   loadDistresses();
-  const initial = params.get("q");
-  if (initial) qEl.value = initial;
-  if (initial || selected.size) onCriteriaChanged();
-  else { setStatus(idleText()); refreshControls(); }
+  onCriteriaChanged(true);        // with nothing set this browses everything by list stack
 }

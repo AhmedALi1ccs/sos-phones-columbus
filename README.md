@@ -3,6 +3,11 @@
 A static site (GitHub Pages) for searching the `BuyBox` property list in Supabase and
 tracking phone numbers per property.
 
+- **Browse everything** by default: with nothing typed and nothing filtered, the home
+  page lists all 285,947 records ordered by **list stack** — how many distinct distress
+  reasons the record carries — heaviest first. The badge on each result is that number.
+- **Paginated**, 15 per page, with first/prev/numbered/next/last. The page is in the URL
+  (`?p=14`).
 - **Search** by any part of a property address, owner name, mailing address or FOLIO,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
@@ -48,6 +53,10 @@ python3 -m http.server 8080
 | `folio_norm()` / `county_norm()` | How a parcel is compared: the cosmetic `F# ` prefix and all punctuation stripped, case-folded. `F# 0442207000`, `f#0442207000` and `0442207000` are the same parcel. **`assets/db.js` has matching `folioKey()`/`countyKey()` — change one and you must change the other.** |
 | `search_properties` / `get_property` / `get_mail_history` | RPCs the pages call. Properties are addressed by **parcel**, not by `BuyBox.id`. |
 | `property_phones` | One row per phone number, keyed to the property by **FOLIO + county**. |
+| `list_stack()` | How many distinct distress reasons a record carries. Built on `distress_keys`, so `HIGH EQUITY` + `High equity` counts once. |
+| `buybox_stack_idx` | `(list_stack("Lists") desc, id) INCLUDE ("Lists")`. The `INCLUDE` is what makes it an **index only** scan — without the underlying column in the index, a deep page costs a heap fetch per skipped row (offset 150k: 7.5s vs 0.8s). |
+| `properties_where()` | Builds the filter as a SQL fragment. `search_properties()` and `count_properties()` both use it, so a page and its total can never disagree. |
+| `count_properties()` | Exact total for the current filter, which is what paging needs. |
 | `distress_norm()` / `distress_keys()` | Fold the `Lists` spellings to one key per reason (`HIGH EQUITY`/`High equity`/`High Equity` → `high equity`, `Tax Del` → `tax delinquent`). 30 raw values become 20 reasons. |
 | `distress_vocab` | Materialised view of reason → label → count, read by `list_distresses()`. |
 | `buybox_lists_gin` | GIN containment index over `distress_keys("Lists")`, so filtering by reason is a bitmap scan (~1ms) rather than a 286k-row scan. |
@@ -105,9 +114,16 @@ A trigger refuses the 31st number for a parcel.
 ## Exporting
 
 The Export button pages through `export_properties()` 1,000 rows at a time and builds
-the CSV in the browser, so it is capped at **50,000 records**; beyond that you get the
-first 50,000 and a warning. The big reasons (`Individual`, `HIGH EQUITY`, `ABSENTEE`)
-are over that on their own — narrow them with a second reason or a search term first.
+the CSV in the browser, so it is capped at **50,000 records**. The button shows what
+will actually come out — `Export 50,000` with a tooltip when more match — and the big
+reasons (`Individual`, `HIGH EQUITY`, `ABSENTEE`, `0$ Transfers`) are over the cap on
+their own, so narrow them with a second reason or a search term first.
+
+## Paging cost
+
+Ordering is served by an index, so page depth costs little: page 1 and page 200 are
+~220ms, page 10,000 ~990ms, the last page (19,063) ~1.8s. Filtered sets are small
+enough that every page of them is fast.
 
 ## Importing phone numbers
 

@@ -250,3 +250,23 @@ dl.kv dd { margin: 0; }
   background: var(--accent); border-color: var(--accent); color: #fff;
 }
 .chip-toggle[aria-pressed="true"] .n { color: rgba(255,255,255,.75); }
+
+/* ---- result summary + pagination ---- */
+.summary { color: var(--muted); font-size: 13px; margin: 0 2px 10px; }
+.summary b { color: var(--text); font-weight: 600; }
+
+.pager { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; margin: 22px 0 8px; }
+.pager button {
+  min-width: 36px; padding: 7px 11px; font-size: 13px; cursor: pointer;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.pager button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pager button[aria-current="page"] {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}
+.pager button:disabled { opacity: .4; cursor: default; }
+.pager .gap { color: var(--muted); padding: 0 2px; }
+
+.chip.stack { background: var(--accent-bg); border-color: transparent; color: var(--accent); font-weight: 600; }

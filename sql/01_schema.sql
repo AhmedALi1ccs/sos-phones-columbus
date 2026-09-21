@@ -120,4 +120,17 @@ $$ select coalesce(array_agg(distinct k), '{}'::text[])
 create index if not exists buybox_lists_gin
   on public."BuyBox" using gin (public.distress_keys("Lists"));
 
+-- how many distinct distress reasons a record carries ("list stack").
+-- Built on distress_keys so HIGH EQUITY + High equity counts once.
+create or replace function public.list_stack(lists text) returns int
+  language sql immutable parallel safe as
+$$ select coalesce(cardinality(public.distress_keys(lists)), 0) $$;
+
+-- Serves "everything, heaviest stack first" without sorting 286k rows.
+-- INCLUDE ("Lists") is what makes it an INDEX ONLY scan: without the underlying
+-- column in the index, deep pages fall back to a heap fetch per row and paging
+-- to offset 150k costs ~7.5s instead of ~0.8s.
+create index if not exists buybox_stack_idx
+  on public."BuyBox" (public.list_stack("Lists") desc, id) include ("Lists");
+
 commit;
