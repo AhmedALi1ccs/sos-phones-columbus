@@ -109,7 +109,8 @@ select r.*,
        case
          when btrim(coalesce(r.folio_in,'')) = '' and btrim(coalesce(r.address,'')) = ''
            then 'row has neither a FOLIO nor an address'
-         when length(r.digits) not in (10, 11)
+         when not (length(r.digits) = 10
+                   or (length(r.digits) = 11 and left(r.digits, 1) = '1'))
            then 'phone is not a 10 digit number'
          when r.parcels = 0 and r.parcels_before_narrowing > 0
            then r.matched_by || ' exists, but the City/Zip/County in this row does not match BuyBox'
@@ -128,12 +129,10 @@ select distinct on (public.folio_norm(folio), public.county_norm(county), norm)
        folio, county, phone_fmt as phone, phone_type, row_no, norm, matched_by
 from (
   select c.folio, c.county_out as county, c.phone_type, c.row_no, c.matched_by,
-         case when length(c.digits) = 11 then substr(c.digits, 2) else c.digits end as norm,
-         case when length(c.digits) in (10, 11)
-              then '(' || substr(right(c.digits, 10), 1, 3) || ') '
-                       || substr(right(c.digits, 10), 4, 3) || '-'
-                       || substr(right(c.digits, 10), 7, 4)
-              else c.phone end as phone_fmt
+         right(c.digits, 10) as norm,
+         '(' || substr(right(c.digits, 10), 1, 3) || ') '
+             || substr(right(c.digits, 10), 4, 3) || '-'
+             || substr(right(c.digits, 10), 7, 4) as phone_fmt
   from classified c
   where c.reject_reason is null
 ) x

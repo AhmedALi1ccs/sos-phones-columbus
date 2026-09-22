@@ -49,7 +49,15 @@ create table if not exists public.property_phones (
   folio_key   text generated always as (upper(regexp_replace(regexp_replace(coalesce(folio,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g'))) stored,
   county_key  text generated always as (lower(btrim(coalesce(county, ''))))                                   stored,
   phone       text not null,
-  phone_norm  text generated always as (regexp_replace(coalesce(phone,''), '\D', '', 'g'))                    stored,
+  -- digits only, with a leading country code dropped, so that 706-555-1234,
+  -- (706) 555-1234 and 1-706-555-1234 are one number and the unique index
+  -- below actually catches the duplicate
+  phone_norm  text generated always as (
+                case when length(regexp_replace(coalesce(phone,''), '\D', '', 'g')) = 11
+                      and left(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 1) = '1'
+                     then substr(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 2)
+                     else regexp_replace(coalesce(phone,''), '\D', '', 'g')
+                end) stored,
   slot        smallint,                       -- display order, 1..30
   phone_type  text check (phone_type is null or phone_type in ('landline','mobile')),
   status      text check (status is null or status in ('correct','wrong','dead')),
