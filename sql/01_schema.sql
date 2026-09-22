@@ -133,4 +133,133 @@ $$ select coalesce(cardinality(public.distress_keys(lists)), 0) $$;
 create index if not exists buybox_stack_idx
   on public."BuyBox" (public.list_stack("Lists") desc, id) include ("Lists");
 
+-- ---------------------------------------------------------------
+-- 4. Street-word folding, shared by address matching and by the search box.
+--    The data stores USPS abbreviations; people type words. One list, so
+--    the two can never disagree.
+-- ---------------------------------------------------------------
+create or replace function public.fold_street_words(a text) returns text
+language sql immutable parallel safe as
+$fn$
+  -- One regexp pass, then a lookup per word. Doing it as ~90 sequential
+  -- regexp_replace calls instead is slow enough that building the index on
+  -- 286k rows exceeds the statement timeout.
+  with cleaned as (
+    select btrim(regexp_replace(lower(coalesce(a, '')), '[^a-z0-9]+', ' ', 'g')) as s
+  ),
+  words as (
+    select t.w, t.ord
+    from cleaned c, unnest(string_to_array(c.s, ' ')) with ordinality as t(w, ord)
+    where c.s <> ''
+  )
+  select nullif(string_agg(coalesce(m.abbr, words.w), ' ' order by words.ord), '')
+  from words
+  left join (values
+      ('street','st'),
+      ('avenue','ave'),
+      ('drive','dr'),
+      ('road','rd'),
+      ('lane','ln'),
+      ('court','ct'),
+      ('circle','cir'),
+      ('boulevard','blvd'),
+      ('place','pl'),
+      ('terrace','ter'),
+      ('parkway','pkwy'),
+      ('highway','hwy'),
+      ('trail','trl'),
+      ('square','sq'),
+      ('apartment','apt'),
+      ('north','n'),
+      ('south','s'),
+      ('east','e'),
+      ('west','w'),
+      ('northeast','ne'),
+      ('northwest','nw'),
+      ('southeast','se'),
+      ('southwest','sw'),
+      ('meadows','mdws'),
+      ('meadow','mdw'),
+      ('heights','hts'),
+      ('ridge','rdg'),
+      ('creek','crk'),
+      ('village','vlg'),
+      ('villages','vlgs'),
+      ('crossing','xing'),
+      ('point','pt'),
+      ('pointe','pt'),
+      ('springs','spgs'),
+      ('spring','spg'),
+      ('landing','lndg'),
+      ('valley','vly'),
+      ('manor','mnr'),
+      ('cove','cv'),
+      ('bend','bnd'),
+      ('gardens','gdns'),
+      ('estates','ests'),
+      ('forest','frst'),
+      ('grove','grv'),
+      ('hills','hls'),
+      ('hill','hl'),
+      ('junction','jct'),
+      ('mount','mt'),
+      ('mountain','mtn'),
+      ('plaza','plz'),
+      ('river','riv'),
+      ('summit','smt'),
+      ('station','sta'),
+      ('turnpike','tpke'),
+      ('view','vw'),
+      ('crest','crst'),
+      ('branch','br'),
+      ('bridge','brg'),
+      ('brook','brk'),
+      ('bluff','blf'),
+      ('center','ctr'),
+      ('centre','ctr'),
+      ('falls','fls'),
+      ('fields','flds'),
+      ('field','fld'),
+      ('fork','frk'),
+      ('fort','ft'),
+      ('glen','gln'),
+      ('green','grn'),
+      ('harbor','hbr'),
+      ('haven','hvn'),
+      ('hollow','holw'),
+      ('lakes','lks'),
+      ('lake','lk'),
+      ('lodge','ldg'),
+      ('orchard','orch'),
+      ('pines','pnes'),
+      ('pine','pne'),
+      ('plains','plns'),
+      ('port','prt'),
+      ('shoals','shls'),
+      ('shores','shrs'),
+      ('shore','shr'),
+      ('trace','trce'),
+      ('extension','ext'),
+      ('cliff','clf'),
+      ('knoll','knl'),
+      ('island','is'),
+      ('isle','is'),
+      ('gateway','gtwy'),
+      ('freeway','fwy'),
+      ('expressway','expy'),
+      ('causeway','cswy'),
+      ('crescent','cres'),
+      ('alley','aly')
+  ) as m(word, abbr) on m.word = words.w
+$fn$;
+
+-- Address matching, for imports that carry an address instead of a FOLIO.
+-- "2451 Juniper Drive" and "2451 JUNIPER DR" both become "2451 JUNIPER DR".
+create or replace function public.addr_norm(a text) returns text
+language sql immutable parallel safe as
+$$ select upper(public.fold_street_words(a)) $$;
+
+create index if not exists buybox_addr_norm_idx
+  on public."BuyBox" (public.addr_norm("Property address"));
+
 commit;

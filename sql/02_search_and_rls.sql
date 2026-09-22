@@ -20,30 +20,15 @@ drop function if exists public.get_mail_history(text);
 -- ---------------------------------------------------------------
 create function public.search_tokens(q text)
 returns text[]
-language plpgsql
+language sql
 immutable
-as $fn$
-declare
-  abbrev constant text[][] := array[
-    ['street','st'],['avenue','ave'],['drive','dr'],['road','rd'],['lane','ln'],
-    ['court','ct'],['circle','cir'],['boulevard','blvd'],['place','pl'],['terrace','ter'],
-    ['parkway','pkwy'],['highway','hwy'],['trail','trl'],['square','sq'],['apartment','apt'],
-    ['north','n'],['south','s'],['east','e'],['west','w'],
-    ['northeast','ne'],['northwest','nw'],['southeast','se'],['southwest','sw']
-  ];
-  norm text;
-  a    text[];
-begin
-  norm := btrim(regexp_replace(lower(coalesce(q, '')), '[^a-z0-9]+', ' ', 'g'));
-  if norm = '' then
-    return '{}'::text[];
-  end if;
-  foreach a slice 1 in array abbrev loop
-    norm := regexp_replace(norm, '\m' || a[1] || '\M', a[2], 'g');
-  end loop;
-  return regexp_split_to_array(norm, '\s+');
-end
-$fn$;
+as $$
+  -- same street-word folding as addr_norm, from the one list in 01_schema.sql
+  select case
+           when public.fold_street_words(q) is null then '{}'::text[]
+           else regexp_split_to_array(public.fold_street_words(q), '\s+')
+         end;
+$$;
 
 -- ---------------------------------------------------------------
 -- properties_where() : the filter, as a SQL fragment over "BuyBox b".
@@ -414,6 +399,8 @@ grant  execute on function public.search_properties(text, int, int, text, text[]
 grant  execute on function public.count_properties(text, text, text[])             to anon, authenticated;
 grant  execute on function public.properties_where(text, text, text[])             to anon, authenticated;
 grant  execute on function public.search_tokens(text)                              to anon, authenticated;
+grant  execute on function public.fold_street_words(text)                          to anon, authenticated;
+grant  execute on function public.addr_norm(text)                                  to anon, authenticated;
 grant  execute on function public.list_distresses()                                to anon, authenticated;
 grant  execute on function public.export_properties(text, text, text[], int, int)  to anon, authenticated;
 grant  execute on function public.get_property(text, text)                         to anon, authenticated;

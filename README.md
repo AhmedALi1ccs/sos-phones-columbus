@@ -125,6 +125,38 @@ Ordering is served by an index, so page depth costs little: page 1 and page 200 
 ~220ms, page 10,000 ~990ms, the last page (19,063) ~1.8s. Filtered sets are small
 enough that every page of them is fast.
 
+## Uploading phone numbers by address (Streamlit)
+
+When the file has an **address** instead of a FOLIO:
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Upload a CSV/XLSX with **Address**, **Phone** and **Phone Type**. City and Zip are
+optional and only matter for addresses that appear more than once. The FOLIO is looked
+up from BuyBox — the file never carries it.
+
+"Check without importing" runs the whole thing in a transaction and rolls back, so you
+see the counts first. Rejected rows are listed with a reason and downloadable as CSV.
+
+### How addresses are matched
+
+`addr_norm()` folds case, punctuation and street words, so `2451 Juniper Drive`,
+`2451 JUNIPER DR` and `308 Cedar Rock Meadows` / `308 CEDAR ROCK MDWS` all match. The
+word list lives once in `fold_street_words()` and the search box uses the same one.
+
+**92% of addresses in BuyBox resolve to exactly one parcel.** The other 19,483 addresses
+(53,193 rows) belong to several — `PINE ST` alone covers 106 different parcels, mostly
+unnumbered lots. Those rows are **rejected, not guessed**, because attaching a phone
+number to the wrong parcel is worse than not attaching it. Adding City and Zip columns
+resolves most of them: `PINE ST` is ambiguous, `PINE ST` + `Aiken` + `29801` is not.
+
+Database credentials come from `.streamlit/secrets.toml` (git-ignored — see
+`secrets.toml.example`) or environment variables, and can be typed into the sidebar.
+This app connects as the database owner, not through the public key.
+
 ## Importing phone numbers
 
 Long format, one row per phone:
