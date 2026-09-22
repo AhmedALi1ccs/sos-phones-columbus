@@ -131,8 +131,17 @@ When the file has an **address** instead of a FOLIO:
 
 ```bash
 pip install -r requirements.txt
-streamlit run streamlit_app.py
+./run_upload.sh                      # or: python3 -m streamlit run streamlit_app.py
 ```
+
+Credentials come from `.streamlit/secrets.toml`, which is git-ignored — copy
+`.streamlit/secrets.toml.example` and fill in the password, and the sidebar fills
+itself in. There is a **Test connection** button there to confirm it before uploading.
+`samples/sample_upload.csv` is a working example file (real parcels, fake 555 numbers).
+
+The uploader is split in two: `phone_import.py` holds the pipeline and imports no
+Streamlit, so it can be run and tested headlessly; `streamlit_app.py` is only the
+interface over it.
 
 Upload a CSV/XLSX with **Phone**, plus either a **FOLIO** or an **Address**. A mix is
 fine: any row that carries a FOLIO uses it directly and skips the address lookup, and
