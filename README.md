@@ -111,6 +111,31 @@ and everything else read BuyBox directly and are never stale.
 
 A trigger refuses the 31st number for a parcel.
 
+## Settings — removing records from BuyBox
+
+`settings.html` has a **Remove from BuyBox** bar. Pick one field to match on — FOLIO,
+Address or Property zip — enter a value, and a confirmation shows **how many records
+match** before anything moves.
+
+Nothing is deleted. Matching records move to **`notBuyBox`**, which carries every
+BuyBox column plus `removed_at`, `removed_by`, `removed_match_field` and
+`removed_match_value`. The page lists recent removals with a **Restore** button that
+puts a batch back under its original ids. **Phone numbers are kept** — they are keyed
+on the parcel and are worth holding on to if the record returns.
+
+> ⚠️ **This page has no login, by choice.** Anyone with the site URL can move records
+> out of BuyBox. A single zip is a big lever: `30906` alone is 26,054 records. Two
+> things limit the damage — removals are reversible from the same page, and the public
+> key still has no direct write access to BuyBox. `remove_from_buybox()` and
+> `restore_to_buybox()` are `SECURITY DEFINER` with a pinned `search_path`, so the only
+> route out of BuyBox is the one that archives. To close the page off later, drop the
+> `grant execute ... to anon` lines at the bottom of `sql/04_removal.sql`.
+
+Matching uses the same normalisation as the rest of the site: `F# 077G222` and
+`077g222` are one parcel, `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are one
+address. An address shared by several parcels removes all of them — the count says so
+before you confirm.
+
 ## Exporting
 
 The Export button pages through `export_properties()` 1,000 rows at a time and builds

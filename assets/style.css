@@ -270,3 +270,44 @@ dl.kv dd { margin: 0; }
 .pager .gap { color: var(--muted); padding: 0 2px; }
 
 .chip.stack { background: var(--accent-bg); border-color: transparent; color: var(--accent); font-weight: 600; }
+
+/* ---- settings: removal bar + confirmation ---- */
+.removebar {
+  display: flex; align-items: center; height: 50px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+}
+.removebar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.removebar select.fieldsel { height: 100%; border-radius: 12px 0 0 12px; min-width: 140px; }
+.removebar input {
+  flex: 1 1 auto; min-width: 0; height: 100%; padding: 0 14px;
+  border: 0; background: transparent; box-shadow: none; font-size: 15px;
+}
+.removebar input:focus { border: 0; box-shadow: none; outline: none; }
+.removebar .btn { height: 100%; border-radius: 0 12px 12px 0; padding: 0 20px; white-space: nowrap; }
+
+.btn.danger { background: var(--bad); color: #fff; }
+.btn.danger:hover { filter: brightness(1.08); }
+
+.modal-back {
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 10, 14, .62); padding: 16px;
+}
+.modal { max-width: 460px; width: 100%; padding: 22px 24px; }
+.modal h2 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
+.modal p { margin: 0 0 6px; color: var(--muted); font-size: 14px; }
+/* after `.modal p`, and more specific than it: the count is the whole point
+   of the dialog and must not be styled as body text */
+.modal p.modal-count {
+  font-size: 34px; font-weight: 680; letter-spacing: -.02em;
+  color: var(--bad); margin: 12px 0 8px; line-height: 1.1;
+}
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+.removal-row {
+  display: flex; align-items: center; gap: 12px; padding: 11px 15px;
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.removal-row:first-child { border-top: 0; }
+.removal-row .what { font-weight: 600; }
+.removal-row .meta { color: var(--muted); font-size: 12.5px; }
+.removal-row .grow { flex: 1 1 auto; }
