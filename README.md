@@ -134,9 +134,14 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Upload a CSV/XLSX with **Address**, **Phone** and **Phone Type**. City and Zip are
-optional and only matter for addresses that appear more than once. The FOLIO is looked
-up from BuyBox — the file never carries it.
+Upload a CSV/XLSX with **Phone**, plus either a **FOLIO** or an **Address**. A mix is
+fine: any row that carries a FOLIO uses it directly and skips the address lookup, and
+only the rest are resolved against BuyBox. **Phone Type**, **City**, **Zip** and
+**County** are optional; the last three only matter for keys that are ambiguous.
+
+**Use FOLIO when you have it.** On a 4,000-row sample of real BuyBox rows, matching by
+FOLIO resolved 99.9% and matching by address resolved 83% — the rest of the addresses
+belong to more than one parcel.
 
 "Check without importing" runs the whole thing in a transaction and rolls back, so you
 see the counts first. Rejected rows are listed with a reason and downloadable as CSV.
@@ -147,11 +152,19 @@ see the counts first. Rejected rows are listed with a reason and downloadable as
 `2451 JUNIPER DR` and `308 Cedar Rock Meadows` / `308 CEDAR ROCK MDWS` all match. The
 word list lives once in `fold_street_words()` and the search box uses the same one.
 
-**92% of addresses in BuyBox resolve to exactly one parcel.** The other 19,483 addresses
-(53,193 rows) belong to several — `PINE ST` alone covers 106 different parcels, mostly
-unnumbered lots. Those rows are **rejected, not guessed**, because attaching a phone
-number to the wrong parcel is worse than not attaching it. Adding City and Zip columns
-resolves most of them: `PINE ST` is ambiguous, `PINE ST` + `Aiken` + `29801` is not.
+**92% of distinct addresses resolve to exactly one parcel** (81% of rows). The other
+19,483 addresses — 53,193 rows — belong to several; `PINE ST` alone covers 106 parcels,
+mostly unnumbered lots. Those rows are **rejected, not guessed**, because attaching a
+phone number to the wrong parcel is worse than not attaching it.
+
+City, Zip and County narrow them: `PINE ST` is ambiguous, `PINE ST` + `Aiken` + `29801`
+is not. The same applies to a FOLIO — 139 parcel numbers are shared across counties, so
+`F# 0310002020` alone is ambiguous while `F# 0310002020` + county `Aiken` is not.
+
+A row whose key is known but whose City/Zip/County contradicts BuyBox is reported as
+such, separately from a key that simply is not there — the two mean different things.
+
+Throughput is about **1ms per row** (4,000 rows in ~4s); both lookups are index scans.
 
 Database credentials come from `.streamlit/secrets.toml` (git-ignored — see
 `secrets.toml.example`) or environment variables, and can be typed into the sidebar.
