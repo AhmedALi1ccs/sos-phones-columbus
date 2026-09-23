@@ -5,8 +5,7 @@ const PER_PAGE = 15;
 
 const vendorEl = document.getElementById("vendor");
 const distEl   = document.getElementById("distress");
-const yearEl   = document.getElementById("year");
-const monthEl  = document.getElementById("month");
+const periodEl = document.getElementById("period");
 const fromEl   = document.getElementById("mailedFrom");
 const toEl     = document.getElementById("mailedTo");
 const qEl      = document.getElementById("q");
@@ -25,15 +24,23 @@ let pageSeq = 0, countSeq = 0;
 let page = 0;
 let total = null;
 
-const filters = () => ({
-  q: qEl.value.trim() || null,
-  p_vendor: vendorEl.value || null,
-  p_distress: distEl.value || null,
-  p_mailed_from: fromEl.value || null,
-  p_mailed_to: toEl.value || null,
-  p_month: monthEl.value ? Number(monthEl.value) : null,
-  p_year: yearEl.value ? Number(yearEl.value) : null
-});
+/** Picking a month is just a from/to over that month, so there is one filter. */
+function monthRange(iso) {
+  const [y, m] = iso.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return { from: `${iso}`, to: last };
+}
+
+const filters = () => {
+  const r = periodEl.value ? monthRange(periodEl.value) : null;
+  return {
+    q: qEl.value.trim() || null,
+    p_vendor: vendorEl.value || null,
+    p_distress: distEl.value || null,
+    p_mailed_from: (r ? r.from : fromEl.value) || null,
+    p_mailed_to: (r ? r.to : toEl.value) || null
+  };
+};
 const anyFilter = () => Object.values(filters()).some(Boolean);
 const totalPages = () => (total === null ? null : Math.max(1, Math.ceil(total / PER_PAGE)));
 
@@ -55,16 +62,10 @@ async function loadFacets() {
   ]);
 
   if (!per.error) {
-    // one call feeds both pickers; a row with no month or year shows as (none)
-    const years = new Map(), months = new Map();
-    for (const r of per.data) {
-      if (r.yr) years.set(r.yr, (years.get(r.yr) || 0) + Number(r.n));
-      if (r.mon) months.set(r.mon, (months.get(r.mon) || 0) + Number(r.n));
-    }
-    yearEl.insertAdjacentHTML("beforeend", [...years.entries()].sort((a, b2) => b2[0] - a[0])
-      .map(([y, n]) => `<option value="${y}">${y} (${n.toLocaleString()})</option>`).join(""));
-    monthEl.insertAdjacentHTML("beforeend", [...months.entries()].sort((a, b2) => a[0] - b2[0])
-      .map(([m, n]) => `<option value="${m}">${MONTHS[m]} (${n.toLocaleString()})</option>`).join(""));
+    periodEl.insertAdjacentHTML("beforeend", per.data.map((r) => {
+      const [y, m] = String(r.period).split("-").map(Number);
+      return `<option value="${String(r.period).slice(0, 7)}-01">${MONTHS[m]} ${y} (${Number(r.n).toLocaleString()})</option>`;
+    }).join(""));
   }
 
   if (!v.error) {
@@ -84,7 +85,7 @@ async function loadFacets() {
         `(${bounds.first_mailed} to ${bounds.last_mailed}); ` +
         `${Number(bounds.n_undated).toLocaleString()} do not yet.`;
     } else {
-      infoEl.textContent = "No mail dates recorded yet — upload them from the Mail dates page.";
+      infoEl.textContent = "No dates on these rows yet.";
     }
   }
   // “(none)” is a real choice: rows whose Type names no vendor or distress
@@ -93,14 +94,11 @@ async function loadFacets() {
 }
 
 /* -------------------------------- rows -------------------------------- */
-/** "September 2026", or whatever of it the row actually carries. */
-function period(r) {
-  const m = clean(r.mail_month), y = clean(r.mail_year);
-  if (!m && !y) return clean(r.mail_type);
-  const n = MONTHS.findIndex((x) => x && x.toLowerCase().startsWith(m.toLowerCase().slice(0, 3)));
-  const month = /^\d+$/.test(m) ? (MONTHS[Number(m)] || m) : (n > 0 ? MONTHS[n] : m);
-  const year = /^\d{2}$/.test(y) ? `20${y}` : y;
-  return [month, year].filter(Boolean).join(" ");
+/** "September 2026", or "29 Sep 2026" when the day matters. */
+function monthLabel(d, withDay = false) {
+  if (!d) return "";
+  const [y, m, day] = String(d).split("-").map(Number);
+  return withDay ? `${day} ${MONTHS[m].slice(0, 3)} ${y}` : `${MONTHS[m]} ${y}`;
 }
 
 function rowHtml(r) {
@@ -118,8 +116,8 @@ function rowHtml(r) {
         ${r.vendor ? `<span class="chip vendor">${esc(r.vendor)}</span>` : ""}
         ${r.distress ? `<span class="chip">${esc(r.distress)}</span>` : ""}
       </span>
-      <span class="meta">${esc(period(r))}</span>
-      <span class="when${r.mailed_on ? "" : " none"}">${r.mailed_on ? esc(r.mailed_on) : "no date"}</span>
+      <span class="meta">${esc(clean(r.check_no))}</span>
+      <span class="when${r.mailed_on ? "" : " none"}">${r.mailed_on ? esc(monthLabel(r.mailed_on, true)) : "no date"}</span>
     </div>`;
 }
 
@@ -214,8 +212,7 @@ function syncUrl() {
   const set = (k, v) => v ? url.searchParams.set(k, v) : url.searchParams.delete(k);
   set("v", vendorEl.value);
   set("md", distEl.value);
-  set("y", yearEl.value);
-  set("mo", monthEl.value);
+  set("mo", periodEl.value);
   set("mf", fromEl.value);
   set("mt", toEl.value);
   set("q", qEl.value.trim());
@@ -227,8 +224,7 @@ function restoreFromUrl() {
   const p = new URLSearchParams(location.search);
   if (p.get("v")) vendorEl.value = p.get("v");
   if (p.get("md")) distEl.value = p.get("md");
-  if (p.get("y")) yearEl.value = p.get("y");
-  if (p.get("mo")) monthEl.value = p.get("mo");
+  if (p.get("mo")) periodEl.value = p.get("mo");
   if (p.get("mf")) fromEl.value = p.get("mf");
   if (p.get("mt")) toEl.value = p.get("mt");
   if (p.get("q")) qEl.value = p.get("q");
@@ -243,18 +239,18 @@ function onFilterChange() {
   load();
 }
 
-[vendorEl, distEl, yearEl, monthEl, fromEl, toEl].forEach((el) => el.addEventListener("change", onFilterChange));
+[vendorEl, distEl, periodEl, fromEl, toEl].forEach((el) => el.addEventListener("change", onFilterChange));
 let debounce;
 qEl.addEventListener("input", () => { clearTimeout(debounce); debounce = setTimeout(onFilterChange, 280); });
 clearBtn.addEventListener("click", () => {
-  [vendorEl, distEl, yearEl, monthEl].forEach((el) => (el.value = ""));
+  [vendorEl, distEl, periodEl].forEach((el) => (el.value = ""));
   [fromEl, toEl, qEl].forEach((el) => (el.value = ""));
   onFilterChange();
 });
 
 if (!configured) {
   configBanner(document.getElementById("banner"));
-  [vendorEl, distEl, yearEl, monthEl, fromEl, toEl, qEl].forEach((el) => (el.disabled = true));
+  [vendorEl, distEl, periodEl, fromEl, toEl, qEl].forEach((el) => (el.disabled = true));
 } else {
   loadFacets().then(() => { clearBtn.hidden = !anyFilter(); loadTotal(); });
 }

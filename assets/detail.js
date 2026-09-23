@@ -175,14 +175,13 @@ function renderBody() {
 const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "Sep 2026" from whatever shape the row carries, else the old Type string. */
-function mailPeriod(r) {
-  const m = clean(r.mail_month), y = clean(r.mail_year);
-  if (!m && !y) return clean(r.mail_type);
-  const month = /^\d+$/.test(m) ? (MONTHS[Number(m)] || m) : m.slice(0, 3);
-  const year = /^\d{2}$/.test(y) ? `20${y}` : y;
-  return [month, year].filter(Boolean).join(" ");
+/** "Sep 2026" from the row's date. */
+function mailPeriod(d) {
+  if (!d) return "";
+  const [y, m] = String(d).split("-").map(Number);
+  return `${MONTHS[m]} ${y}`;
 }
+
 async function loadMailed() {
   const box = document.getElementById("mailedBox");
   const { data, error } = await db.rpc("get_mail_history", { p_folio: property.folio });
@@ -192,7 +191,7 @@ async function loadMailed() {
 
   // one chip per mailing: who sent it, what list, and when
   const kinds = [...new Set(data.map((r) => [
-    clean(r.vendor), clean(r.distress), mailPeriod(r)
+    clean(r.vendor), clean(r.distress), mailPeriod(r.mailed_on)
   ].filter(Boolean).join(" · ")).filter(Boolean))];
 
   box.innerHTML =

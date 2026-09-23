@@ -400,8 +400,8 @@ body.sidebar-collapsed .sidetoggle { align-self: center; }
     minmax(95px,  1.1fr)   /* owner */
     minmax(90px,  1fr)     /* city, state zip */
     minmax(170px, auto)    /* vendor + distress chips, together */
-    minmax(105px, 1.1fr)   /* campaign */
-    66px;                  /* mailed on */
+    minmax(105px, 1.1fr)   /* check */
+    96px;                  /* date */
   padding: 11px 15px; border-top: 1px solid var(--border);
 }
 .mail-row:first-child { border-top: 0; }

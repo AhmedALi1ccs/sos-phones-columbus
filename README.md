@@ -132,156 +132,16 @@ A trigger refuses the 31st number for a parcel.
 
 ## The Mailing view
 
-`Mailed` carries **`Vendor`**, **`Distress`**, **`Month`** and **`Year`** as columns of
-their own. Upload files should fill those four; the page filters on each.
+`Mailed` carries **`Vendor`**, **`Distress`** and **`Date`** as columns of their own.
+The page filters on each: a vendor, a distress, a month picked from the dates present,
+or a from/to range, plus free text.
 
-`Month` and `Year` are read however the file writes them — `Sep`, `September`, `9`, `09`
-and `26`, `2026` all work — and `month_num()`/`year_num()` turn them into one number to
-sort and filter by, so a file that mixes formats still orders correctly.
-
-The old `Type` column packed all four into one string (`DM-OLM-Stack Aug26`). It is kept
-and still unpicked as a **fallback**: `mailed_vendor_of()` and `mailed_distress_of()`
-take the column when it has a value and parse `Type` when it does not, so a row carrying
-only the old shape is not lost. The parsers still fold the variants that reached the
-data — `Foreclosure`/`Foreclosures` are one thing, so are `CodeVio`/`CodeioVio`, and
-`TaxDel` reads as *Tax Delinquent*.
+`Date` is a real `date`, not text — that is what lets the page order newest first and
+offer a range. Postgres reads `YYYY-MM-DD`, and with this database's ISO/MDY setting
+`MM/DD/YYYY` as well.
 
 A row with no vendor or distress is offered as **(none)** in the pickers rather than
 hidden.
-
-| Vendor | | Mail distress | |
-| --- | --- | --- | --- |
-| OLM | 14,774 | Stack | 14,195 |
-| DMForce | 11,902 | Tax Delinquent | 7,947 |
-| (none) | 4,999 | (none) | 4,999 |
-| | | Foreclosure | 1,379 |
-| | | Probate | 1,371 |
-| | | Evictions | 1,246 |
-| | | Code Violations | 442 |
-| | | Divorce | 74 |
-| | | Syndicate | 22 |
-
-## Phone statuses
-
-The **Phone status** page has two tabs.
-
-**Upload a file** — a CSV/XLSX with **Address** (or **Parcel Number**), **Phone** and
-**Status**; **Type**, **City**, **Zip** and **County** are optional.
-`samples/sample_statuses.csv` is an example. Per row:
-
-- the number is already on that property → its status is set
-- it is not → the number is added carrying that status
-- a **blank** status adds the number without claiming anything about it, and never
-  clears a status that is already there
-- anything that is not correct / wrong / dead is **reported**, not guessed
-
-Accepted wordings: `correct`/`right`/`good`/`valid`/`yes`, `wrong`/`bad`/`incorrect`/`no`,
-`dead`/`disconnected`/`no longer in service`.
-
-An existing line type is left alone; a type is only filled in where there wasn't one.
-
-**One at a time** — the same thing for a single address and number, showing every number
-already on the property before you save.
-
-Both run through the same pipeline as the phone uploader, which also accepts an optional
-**Status** column now, so the three cannot drift apart.
-
-## Cold calling and SMS
-
-`ColdCalling` and `SMS` are the same table twice: an **address**, a **phone number** and
-a **source**. `coldcalling.html` and `sms.html` list them with a source filter and free
-text search; upload them from the matching page of the Streamlit app.
-
-They are two tables rather than one with a channel column because `ColdCalling` was
-already carrying 50k rows by the time SMS was wanted, and reshaping it would have had to
-be a migration for no gain. What is shared is the code: `contact_import.py` takes the
-table as an argument, `assets/contacts.js` is the list page for both, and the property
-page loads both through one function — so a fix to one is a fix to the other.
-
-The address is resolved to a parcel where BuyBox knows it, which is what lets a row open
-the property page. **An address BuyBox does not know is still loaded**, without a parcel
-— that is the one place this differs from the phone uploader, which rejects what it
-cannot place. A calling list is worth having either way, and the page shows
-`not in BuyBox` for those rows. The same applies to an address that matches several
-properties: loaded, but not linked, since which parcel it is cannot be known.
-
-The same number, for the same address, from the same source is one entry, so re-running
-a list adds only what is new. Addresses are compared with the same folding as everywhere
-else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address.
-
-Rows are rejected only for a missing address or a number that is not 10 digits.
-`samples/sample_cold_calling.csv` is an example file.
-
-Each property page shows both in its **Record** panel, directly under the mail history,
-so they read together: `📞 Cold called ×N` and `💬 Texted ×N` badges, each followed by
-the numbers as dialable chips carrying their source. It is filtered on parcel **and county**, since 139 parcel
-numbers are shared across counties and a list loaded against one of them says nothing
-about the other. Numbers with no parcel link never appear on a property page, because
-they are not attached to one.
-
-## Mail dates## Cold calling and SMS
-
-`ColdCalling` and `SMS` are the same table twice: an **address**, a **phone number** and
-a **source**. `coldcalling.html` and `sms.html` list them with a source filter and free
-text search; upload them from the matching page of the Streamlit app.
-
-They are two tables rather than one with a channel column because `ColdCalling` was
-already carrying 50k rows by the time SMS was wanted, and reshaping it would have had to
-be a migration for no gain. What is shared is the code: `contact_import.py` takes the
-table as an argument, `assets/contacts.js` is the list page for both, and the property
-page loads both through one function — so a fix to one is a fix to the other.
-
-The address is resolved to a parcel where BuyBox knows it, which is what lets a row open
-the property page. **An address BuyBox does not know is still loaded**, without a parcel
-— that is the one place this differs from the phone uploader, which rejects what it
-cannot place. A calling list is worth having either way, and the page shows
-`not in BuyBox` for those rows. The same applies to an address that matches several
-properties: loaded, but not linked, since which parcel it is cannot be known.
-
-The same number, for the same address, from the same source is one entry, so re-running
-a list adds only what is new. Addresses are compared with the same folding as everywhere
-else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address.
-
-Rows are rejected only for a missing address or a number that is not 10 digits.
-`samples/sample_cold_calling.csv` is an example file.
-
-Each property page shows both in its **Record** panel, directly under the mail history,
-so they read together: `📞 Cold called ×N` and `💬 Texted ×N` badges, each followed by
-the numbers as dialable chips carrying their source. It is filtered on parcel **and county**, since 139 parcel
-numbers are shared across counties and a list loaded against one of them says nothing
-about the other. Numbers with no parcel link never appear on a property page, because
-they are not attached to one.
-
-## Mail dates
-
-The mailing house reports the date each record actually went out.
-`Mailed.mailed_on` holds it, with `mailed_src` noting where the date came from.
-A `Mailed` row is one campaign for one parcel, so the date belongs on the row.
-
-Upload them with the **Mail dates** page of the Streamlit app:
-
-```bash
-./run_upload.sh          # the sidebar lists both pages
-```
-
-The file needs a **Date** in `yyyy-mm-dd`, plus a **Parcel Number** or an **Address**.
-An optional **Type** names the campaign. `samples/sample_mail_dates.csv` is an example.
-
-**Include the `Type` column.** A parcel usually carries several campaigns, so a date
-without one can only be attached to whichever of them happens to still be undated.
-
-What an uploaded (parcel, campaign, date) does, in order:
-
-1. that campaign already carries that date → nothing to do
-2. that campaign has a row with no date yet → fill it in
-3. otherwise → add a row for the parcel under that campaign, copying its details from
-   BuyBox, or from its other `Mailed` rows if the parcel is no longer in BuyBox
-
-A row naming no campaign takes whichever undated row the named ones did not claim. Where
-one campaign gets several dates, each claims its own row and any beyond that are added —
-they must not all be pointed at the same row, which would keep only one of the dates.
-
-Two campaigns mailed on the same day are two mailings, and both are recorded.
 
 ## Settings — removing records from BuyBox
 
@@ -342,10 +202,12 @@ The app has three pages, listed in its sidebar:
 | Page | What it does |
 | --- | --- |
 | Upload phone numbers | bulk load numbers against parcel numbers or addresses |
-| Mail dates | record when each record was mailed |
 | Phone status | bulk-apply statuses from a file, or set one by hand |
 | Cold calling | load a calling list: address, number, source |
 | SMS | the same, into the SMS list |
+
+`Mailed` rows are loaded straight into Supabase rather than through this app, so there
+is no page for them.
 
 Credentials come from `.streamlit/secrets.toml`, which is git-ignored — copy
 `.streamlit/secrets.toml.example` and fill in the password, and the sidebar fills
