@@ -3,6 +3,7 @@ import {
   propertyHref, mountWho, toast
 } from "./db.js";
 import { exportCsv, EXPORT_CAP } from "./export.js";
+import { mountSidebar } from "./nav.js";
 
 const PER_PAGE = 15;
 
@@ -31,11 +32,12 @@ const chipsEl   = document.getElementById("distressChips");
 const countEl   = document.getElementById("filterCount");
 const clearBtn  = document.getElementById("clearFilters");
 const exportBtn = document.getElementById("exportBtn");
-const fromEl    = document.getElementById("mailedFrom");
-const toEl      = document.getElementById("mailedTo");
-const clearMail = document.getElementById("clearMailed");
-const mailInfo  = document.getElementById("mailedInfo");
+// the mail filters live on the Mailing page now; the URL still carries a
+// window so a link like ?mf=2026-08-01 keeps working
+const urlParams = new URLSearchParams(location.search);
+const mailWindow = { from: urlParams.get("mf") || null, to: urlParams.get("mt") || null };
 
+mountSidebar("search");
 mountWho(document.getElementById("whoHost"));
 
 function setStatus(html, isHtml = false) {
@@ -52,8 +54,8 @@ let currentField = "all";
 let selected = new Set();
 
 const keys = () => [...selected];
-const mailedFrom = () => fromEl.value || null;
-const mailedTo   = () => toEl.value || null;
+const mailedFrom = () => mailWindow.from;
+const mailedTo   = () => mailWindow.to;
 const hasMailWindow = () => Boolean(mailedFrom() || mailedTo());
 const termIsUsable = () => qEl.value.trim().length >= FIELDS[currentField].min;
 const totalPages = () => (total === null ? null : Math.max(1, Math.ceil(total / PER_PAGE)));
@@ -269,7 +271,6 @@ function onCriteriaChanged(keepPage = false) {
   currentQuery = termIsUsable() ? term : "";
   if (!keepPage) page = 0;
   clearBtn.hidden = selected.size === 0;
-  clearMail.hidden = !hasMailWindow();
   exportBtn.disabled = false;
   exportBtn.textContent = "Export CSV";
   countEl.textContent = "";
@@ -291,28 +292,6 @@ fieldEl.addEventListener("change", () => {
   onCriteriaChanged();
   qEl.focus();
 });
-
-[fromEl, toEl].forEach((el) => el.addEventListener("change", () => onCriteriaChanged()));
-clearMail.addEventListener("click", () => {
-  fromEl.value = "";
-  toEl.value = "";
-  onCriteriaChanged();
-});
-
-/** Tell people what range of mail dates actually exists. */
-async function loadMailBounds() {
-  const { data, error } = await db.rpc("mail_date_bounds");
-  if (error) return;
-  const b = Array.isArray(data) ? data[0] : data;
-  if (!b || !b.first_mailed) {
-    mailInfo.textContent = "No mail dates recorded yet.";
-    return;
-  }
-  [fromEl, toEl].forEach((el) => { el.min = b.first_mailed; el.max = b.last_mailed; });
-  mailInfo.textContent = `${Number(b.n_dated).toLocaleString()} mailings dated, ` +
-                         `${b.first_mailed} to ${b.last_mailed}.` +
-                         (Number(b.n_undated) ? ` ${Number(b.n_undated).toLocaleString()} still undated.` : "");
-}
 
 clearBtn.addEventListener("click", () => {
   selected.clear();
@@ -344,17 +323,14 @@ exportBtn.addEventListener("click", async () => {
 const params = new URLSearchParams(location.search);
 applyField(params.get("f") || "all");
 (params.get("d") || "").split("|").filter(Boolean).forEach((k) => selected.add(k));
-if (params.get("mf")) fromEl.value = params.get("mf");
-if (params.get("mt")) toEl.value = params.get("mt");
 page = Math.max(0, (parseInt(params.get("p"), 10) || 1) - 1);
 if (params.get("q")) qEl.value = params.get("q");
 
 if (!configured) {
   configBanner(document.getElementById("banner"));
-  [qEl, fieldEl, exportBtn, fromEl, toEl].forEach((el) => (el.disabled = true));
+  [qEl, fieldEl, exportBtn].forEach((el) => (el.disabled = true));
   chipsEl.innerHTML = "";
 } else {
   loadDistresses();
-  loadMailBounds();
   onCriteriaChanged(true);        // with nothing set this browses everything by list stack
 }

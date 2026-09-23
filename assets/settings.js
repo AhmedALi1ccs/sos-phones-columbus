@@ -1,4 +1,5 @@
 import { db, configured, configBanner, esc, clean, getWho, mountWho, toast, relTime } from "./db.js";
+import { mountSidebar } from "./nav.js";
 
 const FIELDS = {
   folio:   { label: "Parcel Number", placeholder: "e.g. F# 077G222",
@@ -22,6 +23,7 @@ const bodyEl    = document.getElementById("modalBody");
 const confirmBtn = document.getElementById("confirmBtn");
 const cancelBtn  = document.getElementById("cancelBtn");
 
+mountSidebar("remove");
 mountWho(document.getElementById("whoHost"));
 
 function applyField() {

@@ -41,6 +41,8 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px 64px; }
+/* the mailing list is a table and wants the extra room */
+.wrap.wide { max-width: 1320px; }
 
 header.top {
   border-bottom: 1px solid var(--border);
@@ -351,3 +353,73 @@ dl.kv dd { margin: 0; }
   .navtabs { flex-direction: row; }
   .navtab { flex: 1 1 auto; justify-content: center; }
 }
+
+/* ---- retractable sidebar ---- */
+.sidebar { transition: flex-basis .16s ease; }
+.sidetoggle {
+  align-self: flex-end; margin-bottom: 2px;
+  width: 26px; height: 26px; line-height: 1; cursor: pointer;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 7px; font-size: 13px;
+}
+.sidetoggle:hover { color: var(--accent); border-color: var(--accent); }
+.navtab .ico { font-size: 15px; width: 18px; text-align: center; flex: 0 0 auto; }
+
+body.sidebar-collapsed .sidebar { flex-basis: 52px; }
+body.sidebar-collapsed .navtab .lbl { display: none; }
+body.sidebar-collapsed .navtab { justify-content: center; padding: 9px 0; }
+body.sidebar-collapsed .sidetoggle { align-self: center; }
+
+@media (max-width: 860px) {
+  body.sidebar-collapsed .sidebar { flex-basis: auto; }
+  body.sidebar-collapsed .navtab .lbl { display: inline; }
+}
+
+/* ---- mailing filters ---- */
+.filter-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.ffield {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); font-weight: 600; flex: 0 0 auto;
+}
+.ffield.grow { flex: 1 1 220px; }
+.ffield select, .ffield input {
+  width: auto; min-width: 150px; font-size: 14px; text-transform: none;
+  letter-spacing: 0; color: var(--text); font-weight: 400;
+}
+.ffield.grow input { width: 100%; min-width: 0; }
+
+/* Fixed columns rather than a flex scramble: the address is the column that
+   matters, so it gets the room and the free text beside it ellipsises. */
+.mail-row {
+  display: grid; align-items: center; gap: 12px;
+  /* the minimums must fit the narrowest container this row appears in,
+     or the grid spills past the card it sits in */
+  grid-template-columns:
+    minmax(130px, 1.5fr)   /* property address */
+    minmax(95px,  1.1fr)   /* owner */
+    minmax(90px,  1fr)     /* city, state zip */
+    minmax(170px, auto)    /* vendor + distress chips, together */
+    minmax(105px, 1.1fr)   /* campaign */
+    66px;                  /* mailed on */
+  padding: 11px 15px; border-top: 1px solid var(--border);
+}
+.mail-row:first-child { border-top: 0; }
+.mail-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row .addr { font-weight: 600; letter-spacing: -.01em; }
+.mail-row .who { color: var(--muted); }
+.mail-row .meta { color: var(--muted); font-size: 12.5px; }
+.mail-row .when { font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; }
+.mail-row .when.none { color: var(--muted); font-style: italic; }
+.mail-row .tags { display: flex; gap: 6px; align-items: center; }
+.mail-row .tags .chip { flex: 0 0 auto; }
+
+@media (max-width: 1000px) {
+  .mail-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .mail-row > * { white-space: normal; overflow: visible; }
+  .mail-row .meta, .mail-row .who, .mail-row .tags { grid-column: 1 / -1; }
+  .mail-row .tags { flex-wrap: wrap; }
+  .mail-row .when { text-align: left; }
+}
+
+.chip.vendor { background: rgba(111,155,255,.16); border-color: transparent; color: var(--accent); }

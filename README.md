@@ -11,9 +11,13 @@ tracking phone numbers per property.
 - **Search** by any part of a property address, owner name, mailing address or parcel number,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
-- **Left sidebar** with the sections: **Search** and **Remove**, plus a **Mailed in**
-  date filter that narrows the list to records mailed inside a window
-  (`?mf=2026-08-01&mt=2026-08-31`), combinable with everything else.
+- **Retractable left sidebar** with three sections: **Search**, **Mailing** and
+  **Remove**. The « button collapses it to an icon rail; the choice is remembered per
+  browser. One definition in `assets/nav.js`, mounted by every page.
+- **Mailing** (`mailed.html`) lists every mailing, newest first, filtered by **Vendor**
+  (DMForce / OLM), **Mail distress** (Stack, Tax Delinquent, Probate, …), a **date
+  window**, and free text. All of it is in the URL
+  (`?v=OLM&md=Probate&mf=2026-08-01`).
 - **Filter by distress** on the home page: the reasons in `Lists` as toggle chips with
   counts. Picking several narrows to records carrying **all** of them, and it combines
   with the search box. The selection lives in the URL (`?d=probate|high+equity`).
@@ -123,6 +127,29 @@ and everything else read BuyBox directly and are never stale.
 | `created_at`, `updated_at` | `updated_at` maintained by trigger |
 
 A trigger refuses the 31st number for a parcel.
+
+## The Mailing view
+
+`Type` packs three things into one string — `DM-OLM-Stack Aug26` is vendor `OLM`,
+distress `Stack`, period `Aug26`. `mail_vendor()` and `mail_distress()` pull the first
+two back out so they can be filtered on, folding the variants that reached the data:
+`Foreclosure`/`Foreclosures` are one thing, so are `CodeVio`/`CodeioVio`, and `TaxDel`
+reads as *Tax Delinquent*.
+
+4,999 older rows are just a month (`Jun-26`) and carry neither. They are offered as
+**(none)** in both pickers rather than hidden or guessed at.
+
+| Vendor | | Mail distress | |
+| --- | --- | --- | --- |
+| OLM | 14,774 | Stack | 14,195 |
+| DMForce | 11,902 | Tax Delinquent | 7,947 |
+| (none) | 4,999 | (none) | 4,999 |
+| | | Foreclosure | 1,379 |
+| | | Probate | 1,371 |
+| | | Evictions | 1,246 |
+| | | Code Violations | 442 |
+| | | Divorce | 74 |
+| | | Syndicate | 22 |
 
 ## Mail dates
 
