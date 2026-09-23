@@ -1,9 +1,9 @@
 """
-Upload a cold calling list: address, number, source.
+Upload a SMS list: address, number, source.
 
 An address BuyBox knows is linked to its parcel, which is what lets a row open
 the property page. An address BuyBox does not know is still loaded, without a
-parcel — a calling list is worth having either way. All the work lives in
+parcel — a SMS list is worth having either way. All the work lives in
 cold_import.py.
 """
 
@@ -13,12 +13,12 @@ import streamlit as st
 from contact_import import build_stage, run
 from st_db import guess, read_upload, sidebar_connection
 
-st.set_page_config(page_title="SOS Phones — Cold calling", page_icon="📞", layout="wide")
+st.set_page_config(page_title="SOS Phones — SMS", page_icon="💬", layout="wide")
 
 NONE = "— none —"
 conn_params = sidebar_connection()
 
-st.title("📞 Upload a cold calling list")
+st.title("💬 Upload an SMS list")
 st.caption(
     "Address, number and source. The same number for the same address from the same "
     "source is one entry, so re-uploading a list adds only what is new."
@@ -47,7 +47,7 @@ mapping = {}
 for box, (field, label, names) in zip(boxes, FIELDS):
     with box:
         g = guess(cols, *names)
-        choice = st.selectbox(label, opts, index=opts.index(g) if g else 0, key=f"cc_{field}")
+        choice = st.selectbox(label, opts, index=opts.index(g) if g else 0, key=f"sms_{field}")
         mapping[field] = None if choice == NONE else choice
 
 problems = []
@@ -78,11 +78,11 @@ def go(commit):
         return
     try:
         with st.spinner("Matching addresses…" if not commit else "Loading…"):
-            st.session_state["calls_result"] = (
-                run(stage, conn_params=conn_params, table="ColdCalling",
+            st.session_state["sms_result"] = (
+                run(stage, conn_params=conn_params, table="SMS",
                     source_label=label or "upload", commit=commit), commit)
     except Exception as exc:                               # noqa: BLE001
-        st.session_state.pop("calls_result", None)
+        st.session_state.pop("sms_result", None)
         st.error(f"Import failed, nothing was written: {exc}")
 
 
@@ -90,10 +90,10 @@ st.divider()
 left, right = st.columns(2)
 if left.button("Check without loading", use_container_width=True):
     go(False)
-if right.button("Load into Cold calling", type="primary", use_container_width=True):
+if right.button("Load into SMS", type="primary", use_container_width=True):
     go(True)
 
-pair = st.session_state.get("calls_result")
+pair = st.session_state.get("sms_result")
 if pair:
     res, committed = pair
     bad = sum(n for reason, n in res["reasons"] if reason)
@@ -125,4 +125,4 @@ if pair:
         st.dataframe(rej.head(200), use_container_width=True)
         st.download_button("Download all rejected rows (CSV)",
                            rej.to_csv(index=False).encode("utf-8"),
-                           file_name="cold_calling_rejects.csv", mime="text/csv")
+                           file_name="sms_rejects.csv", mime="text/csv")

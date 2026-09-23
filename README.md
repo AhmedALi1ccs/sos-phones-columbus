@@ -11,8 +11,8 @@ tracking phone numbers per property.
 - **Search** by any part of a property address, owner name, mailing address or parcel number,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
-- **Retractable left sidebar** with four sections: **Search**, **Mailing**,
-  **Cold calling** and **Remove**. The « button collapses it to an icon rail; the choice is remembered per
+- **Retractable left sidebar** with five sections: **Search**, **Mailing**,
+  **Cold calling**, **SMS** and **Remove**. The « button collapses it to an icon rail; the choice is remembered per
   browser. One definition in `assets/nav.js`, mounted by every page.
 - **Mailing** (`mailed.html`) lists every mailing, newest first, filtered by **Vendor**
   (DMForce / OLM), **Mail distress** (Stack, Tax Delinquent, Probate, …), a **date
@@ -24,8 +24,8 @@ tracking phone numbers per property.
 - **Export CSV** of whatever is filtered — property fields plus each parcel's phone
   numbers flattened into `Phone 1`, `Phone 1 Type`, `Phone 1 Status`, … the same shape
   the importer reads.
-- **Property page** shows cold calling in the **Record** panel, under the mail history:
-  a count, then each number as a dialable chip carrying its source.
+- **Property page** shows cold calling and SMS in the **Record** panel, under the mail
+  history: a count each, then every number as a dialable chip carrying its source.
 - **Property page** shows the owner + address block, the `Lists` distresses, mail history,
   and up to **30 phone numbers**, each with a status: ✅ Correct · ❌ Wrong · 💀 Dead
   (no status = ○). Click a symbol to set it, click it again to clear it.
@@ -178,11 +178,17 @@ already on the property before you save.
 Both run through the same pipeline as the phone uploader, which also accepts an optional
 **Status** column now, so the three cannot drift apart.
 
-## Cold calling
+## Cold calling and SMS
 
-`ColdCalling` holds an **address**, a **phone number** and a **source** — where that
-number came from. `coldcalling.html` lists them with a source filter and free text
-search; upload them from the **Cold calling** page of the Streamlit app.
+`ColdCalling` and `SMS` are the same table twice: an **address**, a **phone number** and
+a **source**. `coldcalling.html` and `sms.html` list them with a source filter and free
+text search; upload them from the matching page of the Streamlit app.
+
+They are two tables rather than one with a channel column because `ColdCalling` was
+already carrying 50k rows by the time SMS was wanted, and reshaping it would have had to
+be a migration for no gain. What is shared is the code: `contact_import.py` takes the
+table as an argument, `assets/contacts.js` is the list page for both, and the property
+page loads both through one function — so a fix to one is a fix to the other.
 
 The address is resolved to a parcel where BuyBox knows it, which is what lets a row open
 the property page. **An address BuyBox does not know is still loaded**, without a parcel
@@ -198,18 +204,24 @@ else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address
 Rows are rejected only for a missing address or a number that is not 10 digits.
 `samples/sample_cold_calling.csv` is an example file.
 
-Each property page shows cold calling in its **Record** panel, directly under the mail
-history, so the two read together: a `📞 Cold called ×N` badge and then each number as a
-dialable chip with its source. It is filtered on parcel **and county**, since 139 parcel
+Each property page shows both in its **Record** panel, directly under the mail history,
+so they read together: `📞 Cold called ×N` and `💬 Texted ×N` badges, each followed by
+the numbers as dialable chips carrying their source. It is filtered on parcel **and county**, since 139 parcel
 numbers are shared across counties and a list loaded against one of them says nothing
 about the other. Numbers with no parcel link never appear on a property page, because
 they are not attached to one.
 
-## Mail dates## Cold calling
+## Mail dates## Cold calling and SMS
 
-`ColdCalling` holds an **address**, a **phone number** and a **source** — where that
-number came from. `coldcalling.html` lists them with a source filter and free text
-search; upload them from the **Cold calling** page of the Streamlit app.
+`ColdCalling` and `SMS` are the same table twice: an **address**, a **phone number** and
+a **source**. `coldcalling.html` and `sms.html` list them with a source filter and free
+text search; upload them from the matching page of the Streamlit app.
+
+They are two tables rather than one with a channel column because `ColdCalling` was
+already carrying 50k rows by the time SMS was wanted, and reshaping it would have had to
+be a migration for no gain. What is shared is the code: `contact_import.py` takes the
+table as an argument, `assets/contacts.js` is the list page for both, and the property
+page loads both through one function — so a fix to one is a fix to the other.
 
 The address is resolved to a parcel where BuyBox knows it, which is what lets a row open
 the property page. **An address BuyBox does not know is still loaded**, without a parcel
@@ -225,9 +237,9 @@ else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address
 Rows are rejected only for a missing address or a number that is not 10 digits.
 `samples/sample_cold_calling.csv` is an example file.
 
-Each property page shows cold calling in its **Record** panel, directly under the mail
-history, so the two read together: a `📞 Cold called ×N` badge and then each number as a
-dialable chip with its source. It is filtered on parcel **and county**, since 139 parcel
+Each property page shows both in its **Record** panel, directly under the mail history,
+so they read together: `📞 Cold called ×N` and `💬 Texted ×N` badges, each followed by
+the numbers as dialable chips carrying their source. It is filtered on parcel **and county**, since 139 parcel
 numbers are shared across counties and a list loaded against one of them says nothing
 about the other. Numbers with no parcel link never appear on a property page, because
 they are not attached to one.
@@ -321,6 +333,7 @@ The app has three pages, listed in its sidebar:
 | Mail dates | record when each record was mailed |
 | Phone status | bulk-apply statuses from a file, or set one by hand |
 | Cold calling | load a calling list: address, number, source |
+| SMS | the same, into the SMS list |
 
 Credentials come from `.streamlit/secrets.toml`, which is git-ignored — copy
 `.streamlit/secrets.toml.example` and fill in the password, and the sidebar fills

@@ -1,11 +1,14 @@
 """
-Loading cold calling lists.
+Loading contact lists: cold calling, SMS, or anything else of the same shape.
 
 A row is an address, a number and where the number came from. The address is
 resolved to a parcel when BuyBox knows it, which is what lets a row link to the
 property page -- but an address BuyBox does not know is still loaded, without a
-parcel, because a calling list is worth having either way. That is the one place
-this differs from the phone uploader, which rejects what it cannot place.
+parcel, because the list is worth having either way. That is the one place this
+differs from the phone uploader, which rejects what it cannot place.
+
+The table is a parameter so the channels cannot drift apart: ColdCalling and SMS
+have the same columns and the same rules, and fixing one fixes both.
 
 Kept free of Streamlit so it can be exercised without a browser.
 """
@@ -84,15 +87,22 @@ order by upper(public.fold_street_words(address)), right(digits, 10),
          coalesce(btrim(source), ''), row_no;
 """
 
+# the only table-specific statement; the conflict target is the same index
+# expression on both, so nothing else has to change per channel
 INSERT_SQL = """
-insert into public."ColdCalling" (address, phone, source, folio, county, uploaded_src)
+insert into public.{table} (address, phone, source, folio, county, uploaded_src)
 select address, phone, source, folio, county, %s
 from to_load
 on conflict (addr_key, phone_norm, coalesce(source, '')) do nothing;
 """
 
+TABLES = {"ColdCalling", "SMS"}
 
-def run(stage, *, conn_params, source_label="upload", commit=False):
+
+def run(stage, *, conn_params, table="ColdCalling", source_label="upload", commit=False):
+    if table not in TABLES:
+        raise ValueError(f"unknown table {table!r}")
+
     buf = io.StringIO()
     stage.to_csv(buf, index=False, header=False)
     buf.seek(0)
@@ -117,7 +127,7 @@ def run(stage, *, conn_params, source_label="upload", commit=False):
                 from classified where reject_reason is not null order by row_no""")
             rejects = cur.fetchall()
 
-            cur.execute(INSERT_SQL, (source_label,))
+            cur.execute(INSERT_SQL.format(table=f'"{table}"'), (source_label,))
             inserted = cur.rowcount
 
             cur.execute("""

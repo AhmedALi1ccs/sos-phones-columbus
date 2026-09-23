@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOS Phones — SMS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap wide">
+    <span class="brand"><span class="dot"></span> SOS Phones</span>
+    <span class="spacer"></span>
+    <span id="whoHost"></span>
+  </div>
+</header>
+
+<div class="shell wrap wide">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <div id="banner"></div>
+    <h1 class="addr">SMS</h1>
+    <p class="sub">Numbers gathered for texting, and where each one came from.</p>
+
+    <section class="card panel filters">
+      <div class="filters-head">
+        <h2>Filters</h2>
+        <span class="filters-count" id="callCount"></span>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="clearFilters" hidden>Clear</button>
+      </div>
+      <div class="filter-grid">
+        <label class="ffield">Source
+          <select id="source"><option value="">Any source</option></select>
+        </label>
+        <label class="ffield grow">Search
+          <input type="search" id="q" autocomplete="off" placeholder="address, number, parcel number…">
+        </label>
+      </div>
+      <p class="hint" id="callInfo" style="margin:10px 0 0"></p>
+    </section>
+
+    <div id="summary" class="summary"></div>
+    <div id="status" class="empty"></div>
+    <div class="card" id="rows"></div>
+    <nav id="pager" class="pager" aria-label="Pages"></nav>
+  </main>
+</div>
+
+<script src="config.js"></script>
+<script type="module" src="assets/sms.js"></script>
+</body>
+</html>

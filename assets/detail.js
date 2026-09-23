@@ -39,7 +39,7 @@ async function load() {
   property = res;
   renderHead();
   renderBody();
-  if (property.folio) { loadPhones(); loadMailed(); loadColdCalls(); }
+  if (property.folio) { loadPhones(); loadMailed(); loadColdCalls(); loadSms(); }
 }
 
 async function loadByFolio() {
@@ -138,6 +138,10 @@ function renderBody() {
           ${clean(p.folio) ? `<span class="badge no">Checking cold calling…</span>`
                            : `<span class="badge no">📞 No cold calling</span>`}
         </div>
+        <div style="margin-top:10px" id="smsBox">
+          ${clean(p.folio) ? `<span class="badge no">Checking SMS…</span>`
+                           : `<span class="badge no">💬 No SMS</span>`}
+        </div>
       </section>
     </div>
 
@@ -181,25 +185,29 @@ async function loadMailed() {
     (kinds.length ? `<div class="chips" style="margin-top:8px">${chipsHtml(kinds)}</div>` : "");
 }
 
-/* ---------------------------- cold calling ---------------------------- */
-async function loadColdCalls() {
-  const box = document.getElementById("coldBox");
+/* ------------------------ cold calling and SMS ------------------------ */
+/**
+ * Both lists hold the same columns and read the same way on the page, so one
+ * function serves them and they cannot drift apart.
+ */
+async function loadContactList({ table, boxId, icon, had, none }) {
+  const box = document.getElementById(boxId);
   // filtered on the county too: 139 parcel numbers are shared across counties,
   // and a list loaded against one of them is not about the other
   const { data, error } = await db
-    .from("ColdCalling")
+    .from(table)
     .select("phone, source")
     .eq("folio_key", folioKey(property.folio))
     .eq("county_key", countyKey(property.county))
     .order("source", { ascending: true, nullsFirst: false })
     .order("id", { ascending: true });
 
-  if (error)        { box.innerHTML = `<span class="badge no">Cold calling unavailable</span>`; return; }
-  if (!data.length) { box.innerHTML = `<span class="badge no">📞 Not cold called</span>`; return; }
+  if (error)        { box.innerHTML = `<span class="badge no">${esc(table)} unavailable</span>`; return; }
+  if (!data.length) { box.innerHTML = `<span class="badge no">${icon} ${esc(none)}</span>`; return; }
 
   const shown = data.slice(0, 8);
   box.innerHTML =
-    `<span class="badge yes">📞 Cold called ×${data.length}</span>` +
+    `<span class="badge yes">${icon} ${esc(had)} ×${data.length}</span>` +
     `<div class="chips" style="margin-top:8px">` +
     shown.map((c) => `
       <a class="chip tel" href="tel:${esc(digits(c.phone))}"
@@ -208,6 +216,15 @@ async function loadColdCalls() {
     (data.length > shown.length ? `<span class="chip">+${data.length - shown.length}</span>` : "") +
     `</div>`;
 }
+
+const loadColdCalls = () => loadContactList({
+  table: "ColdCalling", boxId: "coldBox", icon: "📞",
+  had: "Cold called", none: "Not cold called"
+});
+const loadSms = () => loadContactList({
+  table: "SMS", boxId: "smsBox", icon: "💬",
+  had: "Texted", none: "Not texted"
+});
 
 /* ------------------------------- phones ------------------------------- */
 function phoneFilter(query) {
