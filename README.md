@@ -241,6 +241,12 @@ pip install -r requirements.txt
 ./run_upload.sh                      # or: python3 -m streamlit run streamlit_app.py
 ```
 
+> ⚠️ There are two Streamlit installs on this machine — the `streamlit` command on
+> PATH is Python 3.11's (1.41.1) and `python3 -m streamlit` is 3.12's (1.62.0). Stick to
+> arguments that work in both. `use_container_width=` does; `width=` is newer and raises
+> `TypeError: button() got an unexpected keyword argument 'width'` under 1.41, even
+> though 1.62 prints a deprecation warning telling you to switch to it.
+
 The app has three pages, listed in its sidebar:
 
 | Page | What it does |

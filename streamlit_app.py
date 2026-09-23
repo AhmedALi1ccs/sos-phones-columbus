@@ -45,7 +45,7 @@ if not upload:
 df = read_upload(upload)
 st.success(f"Read **{len(df):,}** rows · {len(df.columns)} columns")
 with st.expander("Preview the file", expanded=True):
-    st.dataframe(df.head(8), width="stretch")
+    st.dataframe(df.head(8), use_container_width=True)
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def show(res, committed):
         st.dataframe(pd.DataFrame(
             res["preview"],
             columns=["Matched by", "Parcel Number", "County", "Phone", "Type", "BuyBox address", "Owner"],
-        ), width="stretch")
+        ), use_container_width=True)
 
     if bad:
         st.subheader("Rejected rows")
@@ -125,7 +125,7 @@ def show(res, committed):
             columns=["Row", "Parcel Number", "Address", "City", "County", "Zip",
                      "Phone", "Phone Type", "Reason"],
         )
-        st.dataframe(rej.head(200), width="stretch")
+        st.dataframe(rej.head(200), use_container_width=True)
         st.download_button("Download all rejected rows (CSV)",
                            rej.to_csv(index=False).encode("utf-8"),
                            file_name="rejects.csv", mime="text/csv")
@@ -148,9 +148,9 @@ def go(commit):
 
 st.divider()
 left, right = st.columns(2)
-if left.button("Check without importing", width="stretch"):
+if left.button("Check without importing", use_container_width=True):
     go(commit=False)
-if right.button("Import to property_phones", type="primary", width="stretch"):
+if right.button("Import to property_phones", type="primary", use_container_width=True):
     go(commit=True)
 
 if "result" in st.session_state:

@@ -40,7 +40,7 @@ with st.form("lookup"):
     st.caption("City, Zip and County are only needed when an address or parcel number "
                "turns out to belong to more than one property.")
 
-    if st.form_submit_button("Look it up", type="primary", width="stretch"):
+    if st.form_submit_button("Look it up", type="primary", use_container_width=True):
         if not conn_params["password"]:
             st.error("No database password — set it in the sidebar.")
         else:
@@ -83,7 +83,7 @@ if hit["phones"]:
         "Status": STATUSES.get(p["status"], ""),
         "Note": p["note"] or "",
         "By": p["updated_by"] or "",
-    } for p in hit["phones"]]), width="stretch", hide_index=True)
+    } for p in hit["phones"]]), use_container_width=True, hide_index=True)
 else:
     st.caption("This property has no phone numbers yet.")
 
@@ -100,7 +100,7 @@ new_type = h.selectbox("Line type", ["", "mobile", "landline"],
                        disabled=bool(existing))
 who = i.text_input("Set by", value="status", max_chars=16)
 
-if st.button("Save status", type="primary", width="stretch"):
+if st.button("Save status", type="primary", use_container_width=True):
     try:
         res = apply_status(conn_params, folio=prop["folio"], county=prop["county"],
                            digits=hit["digits"], status=choice,

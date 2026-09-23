@@ -34,7 +34,7 @@ if not upload:
 df = read_upload(upload)
 st.success(f"Read **{len(df):,}** rows · {len(df.columns)} columns")
 with st.expander("Preview the file", expanded=True):
-    st.dataframe(df.head(8), width="stretch")
+    st.dataframe(df.head(8), use_container_width=True)
 
 cols = list(df.columns)
 opts = [NONE] + cols
@@ -82,7 +82,7 @@ def show(res, committed):
         st.subheader("What this does")
         st.dataframe(pd.DataFrame(
             res["preview"], columns=["Parcel Number", "Mailed on", "Action", "Property address", "City"],
-        ), width="stretch")
+        ), use_container_width=True)
 
     if bad:
         st.subheader("Rejected rows")
@@ -91,7 +91,7 @@ def show(res, committed):
                 st.write(f"- **{n:,}** — {reason}")
         rej = pd.DataFrame(res["rejects"],
                            columns=["Row", "Parcel Number", "Address", "Date", "Type", "Reason"])
-        st.dataframe(rej.head(200), width="stretch")
+        st.dataframe(rej.head(200), use_container_width=True)
         st.download_button("Download all rejected rows (CSV)",
                            rej.to_csv(index=False).encode("utf-8"),
                            file_name="mail_date_rejects.csv", mime="text/csv")
@@ -114,9 +114,9 @@ def go(commit):
 
 st.divider()
 left, right = st.columns(2)
-if left.button("Check without saving", width="stretch"):
+if left.button("Check without saving", use_container_width=True):
     go(commit=False)
-if right.button("Save dates to Mailed", type="primary", width="stretch"):
+if right.button("Save dates to Mailed", type="primary", use_container_width=True):
     go(commit=True)
 
 if "mail_result" in st.session_state:
