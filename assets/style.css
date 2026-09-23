@@ -430,3 +430,5 @@ body.sidebar-collapsed .sidetoggle { align-self: center; }
 }
 
 .chip.vendor { background: rgba(111,155,255,.16); border-color: transparent; color: var(--accent); }
+
+.phone-row .grow { flex: 1 1 auto; }

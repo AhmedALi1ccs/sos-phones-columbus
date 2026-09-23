@@ -39,7 +39,7 @@ async function load() {
   property = res;
   renderHead();
   renderBody();
-  if (property.folio) { loadPhones(); loadMailed(); }
+  if (property.folio) { loadPhones(); loadMailed(); loadColdCalls(); }
 }
 
 async function loadByFolio() {
@@ -155,6 +155,14 @@ function renderBody() {
       </div>
     </section>
 
+    <section class="section">
+      <h2>Cold calling <span id="coldCount" class="hint"></span></h2>
+      <div class="card" id="coldCalls">
+        ${clean(p.folio) ? `<div class="phone-row"><span class="skeleton" style="width:180px"></span></div>`
+                         : `<div class="phone-row"><span class="hint">Unavailable — this record has no parcel number.</span></div>`}
+      </div>
+    </section>
+
     <p class="hint" style="margin-top:14px">
       ${STATUS.correct.symbol} Correct &nbsp;·&nbsp; ${STATUS.wrong.symbol} Wrong number &nbsp;·&nbsp;
       ${STATUS.dead.symbol} Dead line &nbsp;·&nbsp; ${NO_STATUS.symbol} not checked yet.
@@ -175,6 +183,38 @@ async function loadMailed() {
   box.innerHTML =
     `<span class="badge yes">✉️ Mailed ×${data.length}</span>` +
     (kinds.length ? `<div class="chips" style="margin-top:8px">${chipsHtml(kinds)}</div>` : "");
+}
+
+/* ---------------------------- cold calling ---------------------------- */
+async function loadColdCalls() {
+  const host = document.getElementById("coldCalls");
+  // filtered on the county too: 139 parcel numbers are shared across counties,
+  // and a list loaded against one of them is not about the other
+  const { data, error } = await db
+    .from("ColdCalling")
+    .select("phone, source, created_at")
+    .eq("folio_key", folioKey(property.folio))
+    .eq("county_key", countyKey(property.county))
+    .order("source", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true });
+
+  if (error) {
+    host.innerHTML = `<div class="phone-row"><span class="err">${esc(error.message)}</span></div>`;
+    return;
+  }
+  if (!data.length) {
+    host.innerHTML = `<div class="phone-row"><span class="hint">No cold calling numbers for this parcel.</span></div>`;
+    return;
+  }
+
+  document.getElementById("coldCount").textContent = `${data.length}`;
+  host.innerHTML = data.map((c) => `
+    <div class="phone-row">
+      <a class="num" href="tel:${esc(digits(c.phone))}">${esc(fmtPhone(c.phone))}</a>
+      ${clean(c.source) ? `<span class="chip">${esc(clean(c.source))}</span>` : ""}
+      <span class="grow"></span>
+      <span class="meta">added ${esc(relTime(c.created_at))}</span>
+    </div>`).join("");
 }
 
 /* ------------------------------- phones ------------------------------- */

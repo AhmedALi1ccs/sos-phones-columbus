@@ -24,6 +24,8 @@ tracking phone numbers per property.
 - **Export CSV** of whatever is filtered — property fields plus each parcel's phone
   numbers flattened into `Phone 1`, `Phone 1 Type`, `Phone 1 Status`, … the same shape
   the importer reads.
+- **Property page** shows a **Cold calling** section beside the phone numbers, listing
+  the numbers gathered for that parcel and the source each came from.
 - **Property page** shows the owner + address block, the `Lists` distresses, mail history,
   and up to **30 phone numbers**, each with a status: ✅ Correct · ❌ Wrong · 💀 Dead
   (no status = ○). Click a symbol to set it, click it again to clear it.
@@ -196,6 +198,12 @@ else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address
 Rows are rejected only for a missing address or a number that is not 10 digits.
 `samples/sample_cold_calling.csv` is an example file.
 
+Each property page carries a **Cold calling** section listing what was gathered for that
+parcel, with its source. It is filtered on parcel **and county**, since 139 parcel
+numbers are shared across counties and a list loaded against one of them says nothing
+about the other. Numbers with no parcel link never appear on a property page, because
+they are not attached to one.
+
 ## Mail dates## Cold calling
 
 `ColdCalling` holds an **address**, a **phone number** and a **source** — where that
@@ -215,6 +223,12 @@ else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address
 
 Rows are rejected only for a missing address or a number that is not 10 digits.
 `samples/sample_cold_calling.csv` is an example file.
+
+Each property page carries a **Cold calling** section listing what was gathered for that
+parcel, with its source. It is filtered on parcel **and county**, since 139 parcel
+numbers are shared across counties and a list loaded against one of them says nothing
+about the other. Numbers with no parcel link never appear on a property page, because
+they are not attached to one.
 
 ## Mail dates
 
