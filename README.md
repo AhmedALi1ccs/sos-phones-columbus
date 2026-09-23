@@ -151,6 +151,21 @@ reads as *Tax Delinquent*.
 | | | Divorce | 74 |
 | | | Syndicate | 22 |
 
+## Setting a phone status by hand
+
+The **Phone status** page of the Streamlit app takes an address (or parcel number) and a
+phone number together:
+
+- the number is already on that property → its status is changed
+- it is not → it is added, carrying that status
+
+Statuses are the same three the website uses: ✅ Correct, ❌ Wrong, 💀 Dead, or none.
+City, Zip and County are there for the cases where an address or parcel number turns out
+to belong to more than one property — the page says so rather than picking one.
+
+The page shows every number already on the property before you save, so you can see what
+you are changing.
+
 ## Mail dates
 
 The mailing house reports the date each record actually went out.
@@ -225,6 +240,14 @@ When the file has an **address** instead of a FOLIO:
 pip install -r requirements.txt
 ./run_upload.sh                      # or: python3 -m streamlit run streamlit_app.py
 ```
+
+The app has three pages, listed in its sidebar:
+
+| Page | What it does |
+| --- | --- |
+| Upload phone numbers | bulk load numbers against parcel numbers or addresses |
+| Mail dates | record when each record was mailed |
+| Phone status | set one number's status on one property, adding it if absent |
 
 Credentials come from `.streamlit/secrets.toml`, which is git-ignored — copy
 `.streamlit/secrets.toml.example` and fill in the password, and the sidebar fills

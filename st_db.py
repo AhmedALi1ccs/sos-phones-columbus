@@ -30,7 +30,7 @@ def sidebar_connection():
         st.caption("✅ Credentials loaded." if params["password"] else
                    "Set `PGPASSWORD` in `.streamlit/secrets.toml` (git-ignored) or type it above.")
 
-        if st.button("Test connection", use_container_width=True):
+        if st.button("Test connection", width="stretch"):
             try:
                 import psycopg2
                 with psycopg2.connect(**params) as c, c.cursor() as cur:
