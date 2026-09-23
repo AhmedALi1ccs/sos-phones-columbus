@@ -7,8 +7,8 @@ in Mailed is one campaign for one parcel, so a date belongs on a row.
 What an uploaded (parcel, date) does, in order:
 
   1. that parcel already has a row carrying that date  -> nothing to do
-  2. that parcel has a row with no date yet            -> fill it in
-     (preferring a row whose Type matches, when the file names a campaign)
+  2. that campaign has a row with no date yet          -> fill it in
+     (a file naming no campaign fills any undated row for the parcel)
   3. otherwise                                          -> add a row for the
      parcel, copying its details from BuyBox, or from its other Mailed rows
      when the parcel is no longer in BuyBox
@@ -101,47 +101,85 @@ select r.*,
        end as reject_reason
 from resolved r;
 
--- One action per (parcel, date): the same pair listed twice in a file is one
--- event. Where a parcel gets several different dates, each must claim its own
--- undated row -- pointing them all at the same row silently loses every date
--- but one.
+-- One action per (parcel, campaign, date). Where the file names a campaign the
+-- date must land on THAT campaign's row: a parcel typically carries several
+-- undated campaigns, and pairing on the parcel alone drops the date on whichever
+-- one happens to sort first. Rows naming no campaign take whatever is left over.
 create temp table actions on commit drop as
 with wanted as (
-  select distinct on (c.folio_key, c.mailed_on)
-         c.folio_key, c.folio, c.mailed_on, c.type_in, c.row_no
+  select distinct on (c.folio_key, c.mailed_on, coalesce(lower(btrim(coalesce(c.type_in,''))), ''))
+         c.folio_key, c.folio, c.mailed_on, c.type_in,
+         nullif(lower(btrim(coalesce(c.type_in, ''))), '') as type_key,
+         c.row_no
   from classified c
   where c.reject_reason is null
-  order by c.folio_key, c.mailed_on, c.row_no
+  order by c.folio_key, c.mailed_on,
+           coalesce(lower(btrim(coalesce(c.type_in,''))), ''), c.row_no
 ),
 flagged as (
   select w.*,
          exists (select 1 from public."Mailed" m
                   where public.folio_norm(m."FOLIO") = w.folio_key
-                    and m.mailed_on = w.mailed_on) as already_dated
+                    and m.mailed_on = w.mailed_on
+                    and (w.type_key is null
+                         or lower(btrim(coalesce(m."Type", ''))) = w.type_key)) as already_dated
   from wanted w
 ),
-needing as (
-  select f.folio_key, f.mailed_on,
-         row_number() over (partition by f.folio_key order by f.mailed_on) as need_rn
-  from flagged f
-  where not f.already_dated
-),
-slots as (
-  select public.folio_norm(m."FOLIO") as folio_key,
-         m.ctid                       as slot_ctid,
-         row_number() over (partition by public.folio_norm(m."FOLIO")
-                            order by m."Type" nulls last, m.ctid) as rn
+open_slots as (
+  select public.folio_norm(m."FOLIO")                        as folio_key,
+         nullif(lower(btrim(coalesce(m."Type", ''))), '')    as type_key,
+         m.ctid                                              as slot_ctid
   from public."Mailed" m
   where m.mailed_on is null
-    and exists (select 1 from needing n where n.folio_key = public.folio_norm(m."FOLIO"))
+    and exists (select 1 from flagged f
+                 where f.folio_key = public.folio_norm(m."FOLIO") and not f.already_dated)
+),
+-- a row naming a campaign claims an undated row of that same campaign
+need_typed as (
+  select f.folio_key, f.mailed_on, f.type_key,
+         row_number() over (partition by f.folio_key, f.type_key order by f.mailed_on) as rn
+  from flagged f where not f.already_dated and f.type_key is not null
+),
+slot_typed as (
+  select s.folio_key, s.type_key, s.slot_ctid,
+         row_number() over (partition by s.folio_key, s.type_key order by s.slot_ctid) as rn
+  from open_slots s where s.type_key is not null
+),
+claim_typed as (
+  select n.folio_key, n.mailed_on, n.type_key, s.slot_ctid
+  from need_typed n
+  join slot_typed s
+    on s.folio_key = n.folio_key and s.type_key = n.type_key and s.rn = n.rn
+),
+-- a row naming none takes any slot the named ones did not claim
+need_any as (
+  select f.folio_key, f.mailed_on, f.type_key,
+         row_number() over (partition by f.folio_key order by f.mailed_on) as rn
+  from flagged f where not f.already_dated and f.type_key is null
+),
+slot_any as (
+  select s.folio_key, s.slot_ctid,
+         row_number() over (partition by s.folio_key order by s.slot_ctid) as rn
+  from open_slots s
+  where not exists (select 1 from claim_typed c where c.slot_ctid = s.slot_ctid)
+),
+claim_any as (
+  select n.folio_key, n.mailed_on, n.type_key, s.slot_ctid
+  from need_any n
+  join slot_any s on s.folio_key = n.folio_key and s.rn = n.rn
+),
+claims as (
+  select * from claim_typed
+  union all
+  select * from claim_any
 )
 select f.folio_key, f.folio, f.mailed_on, f.type_in, f.row_no, f.already_dated,
-       s.slot_ctid as fill_ctid
+       c.slot_ctid as fill_ctid
 from flagged f
-left join needing n
-       on n.folio_key = f.folio_key and n.mailed_on = f.mailed_on
-left join slots s
-       on s.folio_key = n.folio_key and s.rn = n.need_rn;
+left join claims c
+       on c.folio_key = f.folio_key
+      and c.mailed_on = f.mailed_on
+      and c.type_key is not distinct from f.type_key;
 """
 
 UPDATE_SQL = """

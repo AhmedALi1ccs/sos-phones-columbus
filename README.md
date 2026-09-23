@@ -259,17 +259,21 @@ Upload them with the **Mail dates** page of the Streamlit app:
 The file needs a **Date** in `yyyy-mm-dd`, plus a **Parcel Number** or an **Address**.
 An optional **Type** names the campaign. `samples/sample_mail_dates.csv` is an example.
 
-What an uploaded (parcel, date) does, in order:
+**Include the `Type` column.** A parcel usually carries several campaigns, so a date
+without one can only be attached to whichever of them happens to still be undated.
 
-1. the parcel already has a row carrying that date → nothing to do
-2. the parcel has a row with no date yet → fill it in, preferring a row whose `Type`
-   matches when the file names a campaign
-3. otherwise → add a row for the parcel, copying its details from BuyBox, or from its
-   other `Mailed` rows if the parcel is no longer in BuyBox
+What an uploaded (parcel, campaign, date) does, in order:
 
-Where one parcel gets several different dates, each claims its own undated row and any
-beyond that are added as new rows — they must not all be pointed at the same row, which
-would silently keep only one of the dates.
+1. that campaign already carries that date → nothing to do
+2. that campaign has a row with no date yet → fill it in
+3. otherwise → add a row for the parcel under that campaign, copying its details from
+   BuyBox, or from its other `Mailed` rows if the parcel is no longer in BuyBox
+
+A row naming no campaign takes whichever undated row the named ones did not claim. Where
+one campaign gets several dates, each claims its own row and any beyond that are added —
+they must not all be pointed at the same row, which would keep only one of the dates.
+
+Two campaigns mailed on the same day are two mailings, and both are recorded.
 
 ## Settings — removing records from BuyBox
 

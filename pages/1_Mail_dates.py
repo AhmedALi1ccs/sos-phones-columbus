@@ -19,16 +19,18 @@ conn_params = sidebar_connection()
 
 st.title("✉️ Upload mail dates")
 st.caption(
-    "Records the date each parcel was actually mailed, onto the Mailed table. "
-    "A parcel that already has a row with no date yet has it filled in; otherwise "
-    "a row is added. The same parcel and date twice is one mailing, not two."
+    "Records the date each mailing actually went out, onto the Mailed table. "
+    "Where the file names a campaign the date lands on that campaign's row — a parcel "
+    "usually carries several — and a campaign the parcel has no row for is added. "
+    "The same campaign and date twice is one mailing, not two."
 )
 
 upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"])
 if not upload:
-    st.info("Upload a file with a **Date** (`yyyy-mm-dd`), plus either a **Parcel Number** or an "
-            "**Address**. A **Type** column naming the campaign is optional; when it is "
-            "there, the date is matched to a row for that campaign first.")
+    st.info("Upload a file with a **Date** (`yyyy-mm-dd`), plus either a **Parcel Number** "
+            "or an **Address**. Include the **Type** column naming the campaign: without "
+            "it the date can only be attached to whichever of the parcel's campaigns is "
+            "still undated, which may not be the one you mean.")
     st.stop()
 
 df = read_upload(upload)
