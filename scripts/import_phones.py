@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Import phone numbers into public.property_phones, linking them to BuyBox by FOLIO.
+Import phone numbers into public.property_phones, linking them to BuyBox by parcel number.
 
     python3 scripts/import_phones.py Book1.csv              # dry run, changes nothing
     python3 scripts/import_phones.py Book1.csv --apply      # actually write
 
 Accepts either shape:
 
-    long   FOLIO, Phone, Phone Type[, Status][, Note]
-    wide   FOLIO, Phone 1, Phone 1 Type, Phone 2, Phone 2 Type, ...
+    long   Parcel Number, Phone, Phone Type[, Status][, Note]
+    wide   Parcel Number, Phone 1, Phone 1 Type, Phone 2, Phone 2 Type, ...
 
 County is NOT supplied in the file: it is looked up from BuyBox, because parcel
 numbers repeat across counties.  Rows that cannot be resolved are written to a
@@ -79,7 +79,7 @@ def read_rows(path):
 
         c_folio = pick(headers, "FOLIO", "Folio", "Parcel", "Parcel Number", "APN")
         if not c_folio:
-            sys.exit(f"No FOLIO column found. Headers seen: {headers}")
+            sys.exit(f"No Parcel Number column found. Headers seen: {headers}")
 
         c_phone = pick(headers, "Phone", "Phone Number", "PhoneNumber", "Number")
         wide = []
@@ -152,7 +152,7 @@ def main():
     for folio, phone, ptype, status, note, line in read_rows(args.csv_path):
         fk, d = folio_key(folio), phone_digits(phone)
         if not fk:
-            rejects.append((folio, phone, ptype, status, "no FOLIO")); continue
+            rejects.append((folio, phone, ptype, status, "no parcel number")); continue
         if len(d) != 10:
             rejects.append((folio, phone, ptype, status,
                             "phone is not 10 digits" if d else "phone is empty")); continue
@@ -221,7 +221,7 @@ def main():
     cur.execute("select count(*) from resolved where n_counties > 1")
     ambiguous = cur.fetchone()[0]
 
-    for reason, cond in (("FOLIO not found in BuyBox", "n_counties is null"),
+    for reason, cond in (("Parcel Number not found in BuyBox", "n_counties is null"),
                          ("parcel number used by properties in more than one county", "n_counties > 1")):
         cur.execute(f"select folio, phone, coalesce(phone_type,''), coalesce(status,'') from resolved where {cond}")
         rejects.extend([(a, b, c, d, reason) for a, b, c, d in cur.fetchall()])
@@ -280,7 +280,7 @@ def main():
 
     print(f"""
   matched to a parcel ....... {will_insert + over_cap}
-  FOLIO not in BuyBox ....... {no_match}
+  Parcel Number not in BuyBox  {no_match}
   ambiguous parcel number ... {ambiguous}
   over the {MAX_PHONES}-number cap ..... {over_cap}
   already in the table ...... {skipped_existing}
@@ -304,7 +304,7 @@ def write_rejects(path, rejects):
         return
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        w.writerow(["FOLIO", "Phone", "Phone Type", "Status", "Reason"])
+        w.writerow(["Parcel Number", "Phone", "Phone Type", "Status", "Reason"])
         w.writerows(rejects)
     print(f"{len(rejects)} rejected row(s) written to {path}")
 

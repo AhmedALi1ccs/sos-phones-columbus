@@ -1,11 +1,11 @@
 import { db, configured, configBanner, esc, clean, getWho, mountWho, toast, relTime } from "./db.js";
 
 const FIELDS = {
-  folio:   { label: "FOLIO",        placeholder: "e.g. F# 077G222",
+  folio:   { label: "Parcel Number", placeholder: "e.g. F# 077G222",
              hint: "Matches the parcel number, with or without the “F# ” prefix." },
   address: { label: "Address",      placeholder: "e.g. 308 Cedar Rock Mdws",
              hint: "Matches the property address exactly, ignoring case and street-word spelling. " +
-                   "An address shared by several parcels removes all of them." },
+                   "An address shared by several properties removes all of them." },
   zip:     { label: "Property zip", placeholder: "e.g. 30906",
              hint: "Matches the property zip exactly. A single zip can cover tens of thousands of records." }
 };

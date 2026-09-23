@@ -18,7 +18,7 @@ export function toCsv(rows) {
   );
 
   const head = [
-    "FOLIO", "County", "Full Name", "First Name", "Last Name",
+    "Parcel Number", "County", "Full Name", "First Name", "Last Name",
     "Property address", "Property city", "Property state", "Property zip",
     "Mailing address", "Mailing city", "Mailing state", "Mailing zip",
     "Lists", "Phone count"

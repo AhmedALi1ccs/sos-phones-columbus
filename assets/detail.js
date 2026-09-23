@@ -105,13 +105,13 @@ function renderBody() {
        ${esc(String(p.match_count))} different properties (parcel numbers repeat across counties).
        Showing the first — open it from search to land on the right one.</div>` : ""}
     ${!clean(p.folio) ? `<div class="err">
-       <strong>This record has no FOLIO.</strong> Phone numbers are filed by parcel number,
+       <strong>This record has no Parcel Number.</strong> Phone numbers are filed by parcel,
        so none can be attached to this row until it gets one.</div>` : ""}
 
     <div class="grid">
       <section class="card panel">
         <h2>Owner</h2>
-        ${kv([["Full name", p.full_name], ["First", p.first_name], ["Last", p.last_name], ["Folio", p.folio]])}
+        ${kv([["Full name", p.full_name], ["First", p.first_name], ["Last", p.last_name], ["Parcel number", p.folio]])}
       </section>
 
       <section class="card panel">

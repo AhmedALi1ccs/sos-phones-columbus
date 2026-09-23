@@ -4,7 +4,7 @@ Resolving and loading phone numbers into property_phones.
 Kept free of Streamlit so the whole pipeline can be exercised without a
 browser: streamlit_app.py is only the user interface over this.
 
-A row that carries a FOLIO is matched on it; the rest are matched by address.
+A row that carries a Parcel Number is matched on it; the rest by address.
 Normalisation happens in SQL, using the same functions the website uses, so
 this cannot drift away from what the site considers the same parcel.
 """
@@ -65,7 +65,7 @@ select s.row_no, s.folio_in, s.address, s.city, s.county, s.zip, s.phone, s.ptyp
          when 'house'       then 'landline'
          else null
        end                                                                       as phone_type,
-       case when btrim(coalesce(s.folio_in,'')) <> '' then 'FOLIO' else 'address' end as matched_by,
+       case when btrim(coalesce(s.folio_in,'')) <> '' then 'Parcel Number' else 'address' end as matched_by,
        case when btrim(coalesce(s.folio_in,'')) <> '' then bf.folio   else ba.folio   end as folio,
        case when btrim(coalesce(s.folio_in,'')) <> '' then bf.county  else ba.county  end as county_out,
        case when btrim(coalesce(s.folio_in,'')) <> ''
@@ -108,7 +108,7 @@ create temp table classified on commit drop as
 select r.*,
        case
          when btrim(coalesce(r.folio_in,'')) = '' and btrim(coalesce(r.address,'')) = ''
-           then 'row has neither a FOLIO nor an address'
+           then 'row has neither a Parcel Number nor an address'
          when not (length(r.digits) = 10
                    or (length(r.digits) = 11 and left(r.digits, 1) = '1'))
            then 'phone is not a 10 digit number'
@@ -117,8 +117,8 @@ select r.*,
          when r.parcels = 0
            then r.matched_by || ' not found in BuyBox'
          when r.parcels > 1
-           then r.matched_by || ' belongs to ' || r.parcels
-                || ' different parcels - add City, Zip or County to narrow it'
+           then r.matched_by || ' is used by ' || r.parcels
+                || ' different properties - add City, Zip or County to narrow it'
          else null
        end as reject_reason
 from resolved r;

@@ -1,7 +1,7 @@
 """
 Upload the dates the mailing house reports for each record.
 
-The file carries a FOLIO or an Address, plus the date it went out in
+The file carries a Parcel Number or an Address, plus the date it went out in
 yyyy-mm-dd. All the work lives in mail_import.py, which has no Streamlit
 dependency.
 """
@@ -26,7 +26,7 @@ st.caption(
 
 upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"])
 if not upload:
-    st.info("Upload a file with a **Date** (`yyyy-mm-dd`), plus either a **FOLIO** or an "
+    st.info("Upload a file with a **Date** (`yyyy-mm-dd`), plus either a **Parcel Number** or an "
             "**Address**. A **Type** column naming the campaign is optional; when it is "
             "there, the date is matched to a row for that campaign first.")
     st.stop()
@@ -42,7 +42,7 @@ opts = [NONE] + cols
 st.subheader("Columns")
 boxes = st.columns(4)
 FIELDS = [
-    ("folio",   "FOLIO",   ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
+    ("folio",   "Parcel Number", ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
     ("address", "Address", ("Address", "Property address", "PropertyAddress", "Street")),
     ("date",    "Date *",  ("Date", "Mailed", "Mailed On", "Mail Date", "Mailed Date", "Drop Date")),
     ("type",    "Type",    ("Type", "Campaign", "Mail Type", "List")),
@@ -58,7 +58,7 @@ problems = []
 if not mapping["date"]:
     problems.append("a **Date** column")
 if not mapping["folio"] and not mapping["address"]:
-    problems.append("either a **FOLIO** or an **Address** column")
+    problems.append("either a **Parcel Number** or an **Address** column")
 if problems:
     st.error("This file still needs " + " and ".join(problems) + ".")
     st.stop()
@@ -81,7 +81,7 @@ def show(res, committed):
     if res["preview"]:
         st.subheader("What this does")
         st.dataframe(pd.DataFrame(
-            res["preview"], columns=["FOLIO", "Mailed on", "Action", "Property address", "City"],
+            res["preview"], columns=["Parcel Number", "Mailed on", "Action", "Property address", "City"],
         ), use_container_width=True)
 
     if bad:
@@ -90,7 +90,7 @@ def show(res, committed):
             if reason:
                 st.write(f"- **{n:,}** — {reason}")
         rej = pd.DataFrame(res["rejects"],
-                           columns=["Row", "FOLIO", "Address", "Date", "Type", "Reason"])
+                           columns=["Row", "Parcel Number", "Address", "Date", "Type", "Reason"])
         st.dataframe(rej.head(200), use_container_width=True)
         st.download_button("Download all rejected rows (CSV)",
                            rej.to_csv(index=False).encode("utf-8"),

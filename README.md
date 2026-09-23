@@ -8,7 +8,7 @@ tracking phone numbers per property.
   reasons the record carries — heaviest first. The badge on each result is that number.
 - **Paginated**, 15 per page, with first/prev/numbered/next/last. The page is in the URL
   (`?p=14`).
-- **Search** by any part of a property address, owner name, mailing address or FOLIO,
+- **Search** by any part of a property address, owner name, mailing address or parcel number,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
 - **Left sidebar** with the sections: **Search** and **Remove**, plus a **Mailed in**
@@ -23,6 +23,16 @@ tracking phone numbers per property.
 - **Property page** shows the owner + address block, the `Lists` distresses, mail history,
   and up to **30 phone numbers**, each with a status: ✅ Correct · ❌ Wrong · 💀 Dead
   (no status = ○). Click a symbol to set it, click it again to clear it.
+
+## A note on naming
+
+Everything a person reads — the website, the uploaders, exported CSV headers, rejection
+messages — says **Parcel Number**. The database column is still `"FOLIO"`, because
+renaming it would break the bulk loads into `BuyBox` and every script that writes to it.
+So `b."FOLIO"` in SQL and `Parcel Number` on screen are the same thing.
+
+Upload files may head that column **either way**: `FOLIO`, `Folio`, `Parcel`,
+`Parcel Number`, `parcel_number` and `APN` are all detected automatically.
 
 ## Setup
 
@@ -126,7 +136,7 @@ Upload them with the **Mail dates** page of the Streamlit app:
 ./run_upload.sh          # the sidebar lists both pages
 ```
 
-The file needs a **Date** in `yyyy-mm-dd`, plus a **FOLIO** or an **Address**.
+The file needs a **Date** in `yyyy-mm-dd`, plus a **Parcel Number** or an **Address**.
 An optional **Type** names the campaign. `samples/sample_mail_dates.csv` is an example.
 
 What an uploaded (parcel, date) does, in order:
@@ -143,8 +153,8 @@ would silently keep only one of the dates.
 
 ## Settings — removing records from BuyBox
 
-`settings.html` has a **Remove from BuyBox** bar. Pick one field to match on — FOLIO,
-Address or Property zip — enter a value, and a confirmation shows **how many records
+`settings.html` has a **Remove from BuyBox** bar. Pick one field to match on — Parcel
+Number, Address or Property zip — enter a value, and a confirmation shows **how many records
 match** before anything moves.
 
 Nothing is deleted. Matching records move to **`notBuyBox`**, which carries every
@@ -198,13 +208,13 @@ The uploader is split in two: `phone_import.py` holds the pipeline and imports n
 Streamlit, so it can be run and tested headlessly; `streamlit_app.py` is only the
 interface over it.
 
-Upload a CSV/XLSX with **Phone**, plus either a **FOLIO** or an **Address**. A mix is
-fine: any row that carries a FOLIO uses it directly and skips the address lookup, and
+Upload a CSV/XLSX with **Phone**, plus either a **Parcel Number** or an **Address**. A mix is
+fine: any row that carries a parcel number uses it directly and skips the address lookup, and
 only the rest are resolved against BuyBox. **Phone Type**, **City**, **Zip** and
 **County** are optional; the last three only matter for keys that are ambiguous.
 
-**Use FOLIO when you have it.** On a 4,000-row sample of real BuyBox rows, matching by
-FOLIO resolved 99.9% and matching by address resolved 83% — the rest of the addresses
+**Use the parcel number when you have it.** On a 4,000-row sample of real BuyBox rows,
+matching by parcel number resolved 99.9% and matching by address resolved 83% — the rest of the addresses
 belong to more than one parcel.
 
 "Check without importing" runs the whole thing in a transaction and rolls back, so you

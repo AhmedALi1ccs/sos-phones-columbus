@@ -53,7 +53,7 @@ select s.row_no, s.folio_in, s.address, s.date_in, s.type_in,
        -- the file is specified as yyyy-mm-dd; anything else is reported, not guessed
        case when btrim(coalesce(s.date_in,'')) ~ '^\\d{4}-\\d{2}-\\d{2}$'
             then to_date(btrim(s.date_in), 'YYYY-MM-DD') end                      as mailed_on,
-       case when btrim(coalesce(s.folio_in,'')) <> '' then 'FOLIO' else 'address' end as matched_by,
+       case when btrim(coalesce(s.folio_in,'')) <> '' then 'Parcel Number' else 'address' end as matched_by,
        case when btrim(coalesce(s.folio_in,'')) <> ''
             then public.folio_norm(s.folio_in) else ba.fkey end                    as folio_key,
        case when btrim(coalesce(s.folio_in,'')) <> ''
@@ -64,7 +64,7 @@ select s.row_no, s.folio_in, s.address, s.date_in, s.type_in,
             then (bf.folio is not null or mf.folio is not null)
             else ba.folio is not null end                                          as known
 from stage s
--- by FOLIO: is the parcel in BuyBox, or at least already in Mailed?
+-- by parcel number: is it in BuyBox, or at least already in Mailed?
 left join lateral (
   select min(b."FOLIO") as folio from public."BuyBox" b
   where public.folio_norm(b."FOLIO") = public.folio_norm(s.folio_in)
@@ -88,15 +88,15 @@ create temp table classified on commit drop as
 select r.*,
        case
          when btrim(coalesce(r.folio_in,'')) = '' and btrim(coalesce(r.address,'')) = ''
-           then 'row has neither a FOLIO nor an address'
+           then 'row has neither a Parcel Number nor an address'
          when r.mailed_on is null
            then 'date is missing or not yyyy-mm-dd'
          when r.matched_by = 'address' and r.parcels = 0
            then 'address not found in BuyBox'
          when r.matched_by = 'address' and r.parcels > 1
-           then 'address belongs to ' || r.parcels || ' different parcels'
+           then 'address is used by ' || r.parcels || ' different properties'
          when not r.known
-           then 'FOLIO is in neither BuyBox nor Mailed'
+           then 'Parcel Number is in neither BuyBox nor Mailed'
          else null
        end as reject_reason
 from resolved r;

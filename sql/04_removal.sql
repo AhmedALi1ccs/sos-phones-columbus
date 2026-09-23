@@ -56,7 +56,7 @@ begin
     select count(*) into n from public."BuyBox"
      where btrim(coalesce("Property zip", '')) = v;
   else
-    raise exception 'field must be one of folio, address, zip (got %)', p_field
+    raise exception 'field must be one of parcel number, address, zip (got %)', p_field
       using errcode = 'invalid_parameter_value';
   end if;
 
@@ -119,7 +119,7 @@ begin
     insert into public."notBuyBox"
     select m.*, now(), p_by, f, v from moved m;
   else
-    raise exception 'field must be one of folio, address, zip (got %)', p_field
+    raise exception 'field must be one of parcel number, address, zip (got %)', p_field
       using errcode = 'invalid_parameter_value';
   end if;
 

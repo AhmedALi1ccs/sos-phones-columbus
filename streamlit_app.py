@@ -1,7 +1,7 @@
 """
 SOS Phones — upload phone numbers.
 
-Rows carrying a FOLIO use it directly; the rest are resolved against BuyBox by
+Rows carrying a Parcel Number use it directly; the rest are resolved by
 address. All the actual work lives in phone_import.py, which has no Streamlit
 dependency, so the pipeline can be tested without a browser.
 
@@ -27,7 +27,7 @@ conn_params = sidebar_connection()
 # --------------------------------------------------------------------------
 st.title("📞 Upload phone numbers")
 st.caption(
-    "Rows carrying a FOLIO use it as-is; the rest are resolved against BuyBox by "
+    "Rows carrying a Parcel Number use it as-is; the rest are resolved against BuyBox by "
     "address. Anything missing, unknown, or shared by more than one parcel is "
     "reported instead of guessed at."
 )
@@ -35,8 +35,8 @@ st.caption(
 upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"])
 if not upload:
     st.info(
-        "Upload a file with **Phone**, plus either a **FOLIO** or an **Address** "
-        "(a mix is fine — rows with a FOLIO skip the address lookup). "
+        "Upload a file with **Phone**, plus either a **Parcel Number** or an **Address** "
+        "(a mix is fine — rows with a Parcel Number skip the address lookup). "
         "**Phone Type**, **City**, **Zip** and **County** are optional; they only "
         "matter for keys that turn out to be ambiguous."
     )
@@ -55,11 +55,11 @@ cols = list(df.columns)
 opts = [NONE] + cols
 
 st.subheader("Columns")
-st.caption("A row with a FOLIO uses it directly. Only rows without one are looked up by address.")
+st.caption("A row with a Parcel Number uses it directly. Only rows without one are looked up by address.")
 boxes = st.columns(7)
 
 FIELDS = [
-    ("folio",   "FOLIO",      ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
+    ("folio",   "Parcel Number", ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
     ("address", "Address",    ("Address", "Property address", "PropertyAddress", "Street")),
     ("phone",   "Phone *",    ("Phone", "Phone Number", "Number")),
     ("ptype",   "Phone Type", ("Phone Type", "Type", "Line Type")),
@@ -79,7 +79,7 @@ problems = []
 if not mapping["phone"]:
     problems.append("a **Phone** column")
 if not mapping["folio"] and not mapping["address"]:
-    problems.append("either a **FOLIO** or an **Address** column")
+    problems.append("either a **Parcel Number** or an **Address** column")
 if problems:
     st.error("This file still needs " + " and ".join(problems) + ".")
     st.stop()
@@ -112,7 +112,7 @@ def show(res, committed):
         st.subheader("What this attaches")
         st.dataframe(pd.DataFrame(
             res["preview"],
-            columns=["Matched by", "FOLIO", "County", "Phone", "Type", "BuyBox address", "Owner"],
+            columns=["Matched by", "Parcel Number", "County", "Phone", "Type", "BuyBox address", "Owner"],
         ), use_container_width=True)
 
     if bad:
@@ -122,7 +122,7 @@ def show(res, committed):
                 st.write(f"- **{n:,}** — {reason}")
         rej = pd.DataFrame(
             res["rejects"],
-            columns=["Row", "FOLIO", "Address", "City", "County", "Zip",
+            columns=["Row", "Parcel Number", "Address", "City", "County", "Zip",
                      "Phone", "Phone Type", "Reason"],
         )
         st.dataframe(rej.head(200), use_container_width=True)
