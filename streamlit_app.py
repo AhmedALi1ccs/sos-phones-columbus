@@ -8,55 +8,18 @@ dependency, so the pipeline can be tested without a browser.
     streamlit run streamlit_app.py
 """
 
-import os
-
 import pandas as pd
 import streamlit as st
 
 from phone_import import MAX_PHONES, build_stage, run
+from st_db import guess, read_upload, sidebar_connection
 
 st.set_page_config(page_title="SOS Phones — Upload", page_icon="📞", layout="wide")
 
 NONE = "— none —"
 
 
-# --------------------------------------------------------------------------
-# connection
-# --------------------------------------------------------------------------
-def secret(name, default=""):
-    """.streamlit/secrets.toml first, then the environment, then the default."""
-    try:
-        if name in st.secrets:
-            return str(st.secrets[name])
-    except Exception:                                      # no secrets file at all
-        pass
-    return os.environ.get(name, default)
-
-
-with st.sidebar:
-    st.subheader("Database")
-    conn_params = {
-        "host": st.text_input("Host", secret("PGHOST", "aws-1-us-east-2.pooler.supabase.com")),
-        "port": int(st.text_input("Port", secret("PGPORT", "5432")) or 5432),
-        "dbname": st.text_input("Database", secret("PGDATABASE", "postgres")),
-        "user": st.text_input("User", secret("PGUSER", "postgres.hoahkpeblfxjbkhwbdxs")),
-        "password": st.text_input("Password", secret("PGPASSWORD", ""), type="password"),
-        "connect_timeout": 15,
-    }
-    if conn_params["password"]:
-        st.caption("✅ Credentials loaded.")
-    else:
-        st.caption("Set `PGPASSWORD` in `.streamlit/secrets.toml` (git-ignored) "
-                   "or type it above.")
-
-    if st.button("Test connection", use_container_width=True):
-        try:
-            import psycopg2
-            with psycopg2.connect(**conn_params) as c, c.cursor() as cur:
-                cur.execute('select count(*) from public."BuyBox"')
-                st.success(f"Connected — {cur.fetchone()[0]:,} BuyBox records")
-        except Exception as exc:                           # noqa: BLE001
-            st.error(f"{exc}")
+conn_params = sidebar_connection()
 
 
 # --------------------------------------------------------------------------
@@ -79,16 +42,7 @@ if not upload:
     )
     st.stop()
 
-try:
-    if upload.name.lower().endswith(".csv"):
-        df = pd.read_csv(upload, dtype=str, keep_default_na=False)
-    else:
-        df = pd.read_excel(upload, dtype=str).fillna("")
-except Exception as exc:                                   # noqa: BLE001
-    st.error(f"Could not read that file: {exc}")
-    st.stop()
-
-df.columns = [str(c).strip() for c in df.columns]
+df = read_upload(upload)
 st.success(f"Read **{len(df):,}** rows · {len(df.columns)} columns")
 with st.expander("Preview the file", expanded=True):
     st.dataframe(df.head(8), use_container_width=True)
@@ -97,15 +51,6 @@ with st.expander("Preview the file", expanded=True):
 # --------------------------------------------------------------------------
 # column mapping
 # --------------------------------------------------------------------------
-def guess(cols, *wanted):
-    norm = {c.lower().replace(" ", "").replace("_", ""): c for c in cols}
-    for w in wanted:
-        hit = norm.get(w.lower().replace(" ", "").replace("_", ""))
-        if hit:
-            return hit
-    return None
-
-
 cols = list(df.columns)
 opts = [NONE] + cols
 

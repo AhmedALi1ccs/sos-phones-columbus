@@ -11,13 +11,20 @@
 <header class="top">
   <div class="wrap">
     <span class="brand"><span class="dot"></span> SOS Phones</span>
-    <a href="index.html">← Back to search</a>
     <span class="spacer"></span>
     <span id="whoHost"></span>
   </div>
 </header>
 
-<main class="wrap">
+<div class="shell wrap">
+  <aside class="sidebar">
+    <nav class="navtabs">
+      <a class="navtab" href="index.html"><span>🔎</span> Search</a>
+      <a class="navtab active" href="settings.html"><span>🗂</span> Remove</a>
+    </nav>
+
+  </aside>
+  <main class="content">
   <div id="banner"></div>
   <h1 class="addr">Settings</h1>
   <p class="sub">Records removed here are moved to <code>notBuyBox</code>, not deleted, and can be put back.</p>
@@ -49,6 +56,7 @@
     </div>
   </section>
 </main>
+</div>
 
 <div class="modal-back" id="modalBack" hidden>
   <div class="modal card" role="alertdialog" aria-modal="true" aria-labelledby="modalTitle">

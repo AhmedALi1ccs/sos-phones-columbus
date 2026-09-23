@@ -64,7 +64,7 @@ function filename(query, field, keys) {
  * Pages through export_properties and hands back a CSV.
  * onProgress(n) is called after each page so the button can show a count.
  */
-export async function exportCsv({ query, field, keys, onProgress }) {
+export async function exportCsv({ query, field, keys, mailedFrom, mailedTo, onProgress }) {
   const rows = [];
   let skip = 0;
 
@@ -74,7 +74,9 @@ export async function exportCsv({ query, field, keys, onProgress }) {
       field: field,
       p_lists: keys.length ? keys : null,
       max_rows: PAGE_SIZE,
-      skip
+      skip,
+      p_mailed_from: mailedFrom || null,
+      p_mailed_to: mailedTo || null
     });
     if (error) { toast(error.message, true); return null; }
 

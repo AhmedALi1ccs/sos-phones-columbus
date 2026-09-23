@@ -31,6 +31,10 @@ const chipsEl   = document.getElementById("distressChips");
 const countEl   = document.getElementById("filterCount");
 const clearBtn  = document.getElementById("clearFilters");
 const exportBtn = document.getElementById("exportBtn");
+const fromEl    = document.getElementById("mailedFrom");
+const toEl      = document.getElementById("mailedTo");
+const clearMail = document.getElementById("clearMailed");
+const mailInfo  = document.getElementById("mailedInfo");
 
 mountWho(document.getElementById("whoHost"));
 
@@ -48,6 +52,9 @@ let currentField = "all";
 let selected = new Set();
 
 const keys = () => [...selected];
+const mailedFrom = () => fromEl.value || null;
+const mailedTo   = () => toEl.value || null;
+const hasMailWindow = () => Boolean(mailedFrom() || mailedTo());
 const termIsUsable = () => qEl.value.trim().length >= FIELDS[currentField].min;
 const totalPages = () => (total === null ? null : Math.max(1, Math.ceil(total / PER_PAGE)));
 
@@ -116,7 +123,9 @@ async function loadPage() {
     max_rows: PER_PAGE,
     skip: page * PER_PAGE,
     field: currentField,
-    p_lists: selected.size ? keys() : null
+    p_lists: selected.size ? keys() : null,
+    p_mailed_from: mailedFrom(),
+    p_mailed_to: mailedTo()
   });
 
   if (mine !== pageSeq) return;                 // a newer request already fired
@@ -154,7 +163,9 @@ async function loadTotal() {
   const { data, error } = await db.rpc("count_properties", {
     q: currentQuery || null,
     field: currentField,
-    p_lists: selected.size ? keys() : null
+    p_lists: selected.size ? keys() : null,
+    p_mailed_from: mailedFrom(),
+    p_mailed_to: mailedTo()
   });
   if (error || mine !== countSeq) return;
 
@@ -180,8 +191,11 @@ function renderSummary(shown) {
   }
   const to = Math.min(total, from + PER_PAGE - 1);
   const sortedBy = currentQuery ? "best match" : "most distress reasons";
+  const window = hasMailWindow()
+    ? `, mailed ${mailedFrom() ? "from " + mailedFrom() : ""}${mailedFrom() && mailedTo() ? " " : ""}${mailedTo() ? "to " + mailedTo() : ""}`
+    : "";
   summaryEl.innerHTML = total === 0 ? ""
-    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b>, sorted by ${sortedBy}.`;
+    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b>${window}, sorted by ${sortedBy}.`;
 }
 
 /** 1 … 7 8 [9] 10 11 … 19,063 */
@@ -233,6 +247,8 @@ function syncUrl() {
   if (term) url.searchParams.set("q", term); else url.searchParams.delete("q");
   if (currentField !== "all") url.searchParams.set("f", currentField); else url.searchParams.delete("f");
   if (selected.size) url.searchParams.set("d", keys().join("|")); else url.searchParams.delete("d");
+  if (mailedFrom()) url.searchParams.set("mf", mailedFrom()); else url.searchParams.delete("mf");
+  if (mailedTo()) url.searchParams.set("mt", mailedTo()); else url.searchParams.delete("mt");
   if (page > 0) url.searchParams.set("p", page + 1); else url.searchParams.delete("p");
   history.replaceState(null, "", url);
 }
@@ -253,6 +269,7 @@ function onCriteriaChanged(keepPage = false) {
   currentQuery = termIsUsable() ? term : "";
   if (!keepPage) page = 0;
   clearBtn.hidden = selected.size === 0;
+  clearMail.hidden = !hasMailWindow();
   exportBtn.disabled = false;
   exportBtn.textContent = "Export CSV";
   countEl.textContent = "";
@@ -275,6 +292,28 @@ fieldEl.addEventListener("change", () => {
   qEl.focus();
 });
 
+[fromEl, toEl].forEach((el) => el.addEventListener("change", () => onCriteriaChanged()));
+clearMail.addEventListener("click", () => {
+  fromEl.value = "";
+  toEl.value = "";
+  onCriteriaChanged();
+});
+
+/** Tell people what range of mail dates actually exists. */
+async function loadMailBounds() {
+  const { data, error } = await db.rpc("mail_date_bounds");
+  if (error) return;
+  const b = Array.isArray(data) ? data[0] : data;
+  if (!b || !b.first_mailed) {
+    mailInfo.textContent = "No mail dates recorded yet.";
+    return;
+  }
+  [fromEl, toEl].forEach((el) => { el.min = b.first_mailed; el.max = b.last_mailed; });
+  mailInfo.textContent = `${Number(b.n_dated).toLocaleString()} mailings dated, ` +
+                         `${b.first_mailed} to ${b.last_mailed}.` +
+                         (Number(b.n_undated) ? ` ${Number(b.n_undated).toLocaleString()} still undated.` : "");
+}
+
 clearBtn.addEventListener("click", () => {
   selected.clear();
   chipsEl.querySelectorAll(".chip-toggle").forEach((b) => b.setAttribute("aria-pressed", "false"));
@@ -288,6 +327,8 @@ exportBtn.addEventListener("click", async () => {
     query: currentQuery,
     field: currentField,
     keys: keys(),
+    mailedFrom: mailedFrom(),
+    mailedTo: mailedTo(),
     onProgress: (n) => { exportBtn.textContent = `Exporting… ${n.toLocaleString()}`; }
   });
   exportBtn.textContent = label;
@@ -303,16 +344,17 @@ exportBtn.addEventListener("click", async () => {
 const params = new URLSearchParams(location.search);
 applyField(params.get("f") || "all");
 (params.get("d") || "").split("|").filter(Boolean).forEach((k) => selected.add(k));
+if (params.get("mf")) fromEl.value = params.get("mf");
+if (params.get("mt")) toEl.value = params.get("mt");
 page = Math.max(0, (parseInt(params.get("p"), 10) || 1) - 1);
 if (params.get("q")) qEl.value = params.get("q");
 
 if (!configured) {
   configBanner(document.getElementById("banner"));
-  qEl.disabled = true;
-  fieldEl.disabled = true;
-  exportBtn.disabled = true;
+  [qEl, fieldEl, exportBtn, fromEl, toEl].forEach((el) => (el.disabled = true));
   chipsEl.innerHTML = "";
 } else {
   loadDistresses();
+  loadMailBounds();
   onCriteriaChanged(true);        // with nothing set this browses everything by list stack
 }

@@ -11,6 +11,9 @@ tracking phone numbers per property.
 - **Search** by any part of a property address, owner name, mailing address or FOLIO,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
+- **Left sidebar** with the sections: **Search** and **Remove**, plus a **Mailed in**
+  date filter that narrows the list to records mailed inside a window
+  (`?mf=2026-08-01&mt=2026-08-31`), combinable with everything else.
 - **Filter by distress** on the home page: the reasons in `Lists` as toggle chips with
   counts. Picking several narrows to records carrying **all** of them, and it combines
   with the search box. The selection lives in the URL (`?d=probate|high+equity`).
@@ -110,6 +113,33 @@ and everything else read BuyBox directly and are never stale.
 | `created_at`, `updated_at` | `updated_at` maintained by trigger |
 
 A trigger refuses the 31st number for a parcel.
+
+## Mail dates
+
+The mailing house reports the date each record actually went out.
+`Mailed.mailed_on` holds it, with `mailed_src` noting where the date came from.
+A `Mailed` row is one campaign for one parcel, so the date belongs on the row.
+
+Upload them with the **Mail dates** page of the Streamlit app:
+
+```bash
+./run_upload.sh          # the sidebar lists both pages
+```
+
+The file needs a **Date** in `yyyy-mm-dd`, plus a **FOLIO** or an **Address**.
+An optional **Type** names the campaign. `samples/sample_mail_dates.csv` is an example.
+
+What an uploaded (parcel, date) does, in order:
+
+1. the parcel already has a row carrying that date → nothing to do
+2. the parcel has a row with no date yet → fill it in, preferring a row whose `Type`
+   matches when the file names a campaign
+3. otherwise → add a row for the parcel, copying its details from BuyBox, or from its
+   other `Mailed` rows if the parcel is no longer in BuyBox
+
+Where one parcel gets several different dates, each claims its own undated row and any
+beyond that are added as new rows — they must not all be pointed at the same row, which
+would silently keep only one of the dates.
 
 ## Settings — removing records from BuyBox
 

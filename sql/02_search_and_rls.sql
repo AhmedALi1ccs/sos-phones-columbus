@@ -6,7 +6,11 @@ drop function if exists public.search_properties(text, int, int, text);
 drop function if exists public.search_properties(text, int, int, text, text[]);
 drop function if exists public.count_by_distress(text[]);
 drop function if exists public.count_properties(text, text, text[]);
+drop function if exists public.count_properties(text, text, text[], date, date);
 drop function if exists public.properties_where(text, text, text[]);
+drop function if exists public.properties_where(text, text, text[], date, date);
+drop function if exists public.search_properties(text, int, int, text, text[], date, date);
+drop function if exists public.export_properties(text, text, text[], int, int, date, date);
 drop function if exists public.search_tokens(text);
 drop function if exists public.list_distresses();
 drop function if exists public.refresh_distress_vocab();
@@ -36,9 +40,11 @@ $$;
 -- page of results and its total can never disagree about the filter.
 -- ---------------------------------------------------------------
 create function public.properties_where(
-  q       text,
-  field   text   default 'all',
-  p_lists text[] default null
+  q             text,
+  field         text   default 'all',
+  p_lists       text[] default null,
+  p_mailed_from date   default null,
+  p_mailed_to   date   default null
 )
 returns text
 language plpgsql
@@ -66,6 +72,19 @@ declare
 begin
   if p_lists is not null and array_length(p_lists, 1) > 0 then
     w := w || format(' and public.distress_keys(b."Lists") @> %L::text[]', p_lists);
+  end if;
+
+  -- "mailed in this window": served by mailed_folio_date_idx, which leads on
+  -- the parcel because this is an EXISTS correlated to the BuyBox row
+  if p_mailed_from is not null or p_mailed_to is not null then
+    w := w || format(
+      ' and exists (select 1 from public."Mailed" m'
+      ' where public.folio_norm(m."FOLIO") = public.folio_norm(b."FOLIO")'
+      ' and m.mailed_on is not null%s%s)',
+      case when p_mailed_from is not null
+           then format(' and m.mailed_on >= %L::date', p_mailed_from) else '' end,
+      case when p_mailed_to is not null
+           then format(' and m.mailed_on <= %L::date', p_mailed_to) else '' end);
   end if;
 
   -- a FOLIO is a parcel number, not prose: match the normalised form
@@ -107,11 +126,13 @@ $fn$;
 -- "list stack" (number of distress reasons) first.
 -- ---------------------------------------------------------------
 create function public.search_properties(
-  q         text,
-  max_rows  int    default 15,
-  skip      int    default 0,
-  field     text   default 'all',
-  p_lists   text[] default null
+  q             text,
+  max_rows      int    default 15,
+  skip          int    default 0,
+  field         text   default 'all',
+  p_lists       text[] default null,   -- distress keys; a record must carry them all
+  p_mailed_from date   default null,   -- and have been mailed inside this window
+  p_mailed_to   date   default null
 )
 returns table (
   id               bigint,
@@ -200,7 +221,8 @@ begin
        select b.id from public."BuyBox" b where true %s order by %s limit %s offset %s
      )
      select %s from public."BuyBox" b join page on page.id = b.id order by %s',
-    public.properties_where(q, field, p_lists), order_sql, lim, off,
+    public.properties_where(q, field, p_lists, p_mailed_from, p_mailed_to),
+    order_sql, lim, off,
     cols, order_sql);
 end
 $fn$;
@@ -211,16 +233,18 @@ $fn$;
 -- query with OR, the predicate stops being indexable.
 -- ---------------------------------------------------------------
 create function public.count_properties(
-  q       text   default null,
-  field   text   default 'all',
-  p_lists text[] default null
+  q             text   default null,
+  field         text   default 'all',
+  p_lists       text[] default null,
+  p_mailed_from date   default null,
+  p_mailed_to   date   default null
 )
 returns bigint
 language plpgsql
 stable
 as $fn$
 declare
-  w text := public.properties_where(q, field, p_lists);
+  w text := public.properties_where(q, field, p_lists, p_mailed_from, p_mailed_to);
   n bigint;
 begin
   if w = '' then
@@ -266,11 +290,13 @@ $$;
 -- each property's phone numbers, for building a CSV.
 -- ---------------------------------------------------------------
 create function public.export_properties(
-  q        text   default null,
-  field    text   default 'all',
-  p_lists  text[] default null,
-  max_rows int    default 1000,
-  skip     int    default 0
+  q             text   default null,
+  field         text   default 'all',
+  p_lists       text[] default null,
+  max_rows      int    default 1000,
+  skip          int    default 0,
+  p_mailed_from date   default null,
+  p_mailed_to   date   default null
 )
 returns table (
   folio            text,
@@ -298,7 +324,7 @@ as $$
          s.mailing_address, s.mailing_city, s.mailing_state, s.mailing_zip,
          s.lists, s.list_stack,
          coalesce(ph.j, '[]'::jsonb)
-  from public.search_properties(q, max_rows, skip, field, p_lists) s
+  from public.search_properties(q, max_rows, skip, field, p_lists, p_mailed_from, p_mailed_to) s
   left join lateral (
     select jsonb_agg(jsonb_build_object(
              'phone', p.phone, 'type', p.phone_type, 'status', p.status)
@@ -395,14 +421,14 @@ revoke insert, update, delete, truncate on public."BuyBox", public."Mailed" from
 grant  select on public."BuyBox", public."Mailed", public.distress_vocab to anon, authenticated;
 grant  select, insert, update, delete on public.property_phones to anon, authenticated;
 grant  usage on all sequences in schema public to anon, authenticated;
-grant  execute on function public.search_properties(text, int, int, text, text[])  to anon, authenticated;
-grant  execute on function public.count_properties(text, text, text[])             to anon, authenticated;
-grant  execute on function public.properties_where(text, text, text[])             to anon, authenticated;
+grant  execute on function public.search_properties(text, int, int, text, text[], date, date) to anon, authenticated;
+grant  execute on function public.count_properties(text, text, text[], date, date)  to anon, authenticated;
+grant  execute on function public.properties_where(text, text, text[], date, date)  to anon, authenticated;
 grant  execute on function public.search_tokens(text)                              to anon, authenticated;
 grant  execute on function public.fold_street_words(text)                          to anon, authenticated;
 grant  execute on function public.addr_norm(text)                                  to anon, authenticated;
 grant  execute on function public.list_distresses()                                to anon, authenticated;
-grant  execute on function public.export_properties(text, text, text[], int, int)  to anon, authenticated;
+grant  execute on function public.export_properties(text, text, text[], int, int, date, date) to anon, authenticated;
 grant  execute on function public.get_property(text, text)                         to anon, authenticated;
 grant  execute on function public.get_mail_history(text)                           to anon, authenticated;
 grant  execute on function public.folio_norm(text)                                 to anon, authenticated;

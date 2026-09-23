@@ -12,12 +12,26 @@
   <div class="wrap">
     <span class="brand"><span class="dot"></span> SOS Phones</span>
     <span class="spacer"></span>
-    <a href="settings.html">Settings</a>
     <span id="whoHost"></span>
   </div>
 </header>
 
-<main class="wrap">
+<div class="shell wrap">
+  <aside class="sidebar">
+    <nav class="navtabs">
+      <a class="navtab active" href="index.html"><span>🔎</span> Search</a>
+      <a class="navtab" href="settings.html"><span>🗂</span> Remove</a>
+    </nav>
+
+    <section class="side-block">
+      <h2>Mailed in</h2>
+      <label class="side-field">From <input type="date" id="mailedFrom"></label>
+      <label class="side-field">To <input type="date" id="mailedTo"></label>
+      <button class="btn ghost side-clear" id="clearMailed" hidden>Clear dates</button>
+      <p class="hint" id="mailedInfo"></p>
+    </section>
+  </aside>
+  <main class="content">
   <div id="banner"></div>
 
   <div class="searchrow">
@@ -52,6 +66,7 @@
   <div id="results" class="results"></div>
   <nav id="pager" class="pager" aria-label="Pages"></nav>
 </main>
+</div>
 
 <script src="config.js"></script>
 <script type="module" src="assets/search.js"></script>
