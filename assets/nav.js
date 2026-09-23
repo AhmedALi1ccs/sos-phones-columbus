@@ -3,6 +3,7 @@
 const TABS = [
   { key: "search",  href: "index.html",    icon: "🔎", label: "Search" },
   { key: "mailing", href: "mailed.html",   icon: "✉️", label: "Mailing" },
+  { key: "calls",   href: "coldcalling.html", icon: "📞", label: "Cold calling" },
   { key: "remove",  href: "settings.html", icon: "🗂", label: "Remove" }
 ];
 

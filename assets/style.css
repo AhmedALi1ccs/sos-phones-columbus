@@ -330,7 +330,7 @@ dl.kv dd { margin: 0; }
   padding: 9px 12px; border-radius: 9px; color: var(--text);
   font-size: 14.5px; font-weight: 500; text-decoration: none;
 }
-.navtab span { font-size: 15px; width: 18px; text-align: center; }
+.navtab .lbl { white-space: nowrap; }
 .navtab:hover { background: var(--surface-2); text-decoration: none; }
 .navtab.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
 
@@ -411,6 +411,13 @@ body.sidebar-collapsed .sidetoggle { align-self: center; }
 .mail-row .meta { color: var(--muted); font-size: 12.5px; }
 .mail-row .when { font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; }
 .mail-row .when.none { color: var(--muted); font-style: italic; }
+/* the cold calling list ends in a phone number, which needs more room than
+   the mailing list's date */
+.mail-row.calls { grid-template-columns:
+    minmax(150px, 1.4fr) minmax(110px, 1fr) minmax(110px, 1fr)
+    minmax(110px, auto) minmax(110px, 1fr) 128px; }
+.mail-row.calls .when { font-weight: 600; }
+
 .mail-row .tags { display: flex; gap: 6px; align-items: center; }
 .mail-row .tags .chip { flex: 0 0 auto; }
 

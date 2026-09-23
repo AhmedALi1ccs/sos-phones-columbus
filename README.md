@@ -11,8 +11,8 @@ tracking phone numbers per property.
 - **Search** by any part of a property address, owner name, mailing address or parcel number,
   with a dropdown to pick which field to search. The chosen field is kept in the URL
   (`?q=juniper&f=property`) so a search can be shared or reached with the back button.
-- **Retractable left sidebar** with three sections: **Search**, **Mailing** and
-  **Remove**. The « button collapses it to an icon rail; the choice is remembered per
+- **Retractable left sidebar** with four sections: **Search**, **Mailing**,
+  **Cold calling** and **Remove**. The « button collapses it to an icon rail; the choice is remembered per
   browser. One definition in `assets/nav.js`, mounted by every page.
 - **Mailing** (`mailed.html`) lists every mailing, newest first, filtered by **Vendor**
   (DMForce / OLM), **Mail distress** (Stack, Tax Delinquent, Probate, …), a **date
@@ -176,7 +176,47 @@ already on the property before you save.
 Both run through the same pipeline as the phone uploader, which also accepts an optional
 **Status** column now, so the three cannot drift apart.
 
-## Mail dates## Mail dates
+## Cold calling
+
+`ColdCalling` holds an **address**, a **phone number** and a **source** — where that
+number came from. `coldcalling.html` lists them with a source filter and free text
+search; upload them from the **Cold calling** page of the Streamlit app.
+
+The address is resolved to a parcel where BuyBox knows it, which is what lets a row open
+the property page. **An address BuyBox does not know is still loaded**, without a parcel
+— that is the one place this differs from the phone uploader, which rejects what it
+cannot place. A calling list is worth having either way, and the page shows
+`not in BuyBox` for those rows. The same applies to an address that matches several
+properties: loaded, but not linked, since which parcel it is cannot be known.
+
+The same number, for the same address, from the same source is one entry, so re-running
+a list adds only what is new. Addresses are compared with the same folding as everywhere
+else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address.
+
+Rows are rejected only for a missing address or a number that is not 10 digits.
+`samples/sample_cold_calling.csv` is an example file.
+
+## Mail dates## Cold calling
+
+`ColdCalling` holds an **address**, a **phone number** and a **source** — where that
+number came from. `coldcalling.html` lists them with a source filter and free text
+search; upload them from the **Cold calling** page of the Streamlit app.
+
+The address is resolved to a parcel where BuyBox knows it, which is what lets a row open
+the property page. **An address BuyBox does not know is still loaded**, without a parcel
+— that is the one place this differs from the phone uploader, which rejects what it
+cannot place. A calling list is worth having either way, and the page shows
+`not in BuyBox` for those rows. The same applies to an address that matches several
+properties: loaded, but not linked, since which parcel it is cannot be known.
+
+The same number, for the same address, from the same source is one entry, so re-running
+a list adds only what is new. Addresses are compared with the same folding as everywhere
+else, so `308 Cedar Rock Meadows` and `308 CEDAR ROCK MDWS` are the same address.
+
+Rows are rejected only for a missing address or a number that is not 10 digits.
+`samples/sample_cold_calling.csv` is an example file.
+
+## Mail dates
 
 The mailing house reports the date each record actually went out.
 `Mailed.mailed_on` holds it, with `mailed_src` noting where the date came from.
@@ -264,6 +304,7 @@ The app has three pages, listed in its sidebar:
 | Upload phone numbers | bulk load numbers against parcel numbers or addresses |
 | Mail dates | record when each record was mailed |
 | Phone status | bulk-apply statuses from a file, or set one by hand |
+| Cold calling | load a calling list: address, number, source |
 
 Credentials come from `.streamlit/secrets.toml`, which is git-ignored — copy
 `.streamlit/secrets.toml.example` and fill in the password, and the sidebar fills
