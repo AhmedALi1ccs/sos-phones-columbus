@@ -17,7 +17,8 @@ import psycopg2
 MAX_PHONES = 30
 
 # the column order the stage table expects
-STAGE_COLUMNS = ["row_no", "folio_in", "address", "city", "county", "zip", "phone", "ptype"]
+STAGE_COLUMNS = ["row_no", "folio_in", "address", "city", "county", "zip",
+                 "phone", "ptype", "status_in"]
 
 
 def build_stage(df, mapping, first_row=2):
@@ -37,13 +38,14 @@ def build_stage(df, mapping, first_row=2):
         "zip": col("zip"),
         "phone": col("phone"),
         "ptype": col("ptype"),
+        "status_in": col("status"),
     })
 
 
 RESOLVE_SQL = """
 create temp table stage (
   row_no int, folio_in text, address text, city text, county text,
-  zip text, phone text, ptype text
+  zip text, phone text, ptype text, status_in text
 ) on commit drop;
 """
 
@@ -55,7 +57,7 @@ NARROW = """
 
 CLASSIFY_SQL = (f"""
 create temp table resolved on commit drop as
-select s.row_no, s.folio_in, s.address, s.city, s.county, s.zip, s.phone, s.ptype,
+select s.row_no, s.folio_in, s.address, s.city, s.county, s.zip, s.phone, s.ptype, s.status_in,
        regexp_replace(coalesce(s.phone,''), '\\D', '', 'g')                       as digits,
        case lower(btrim(coalesce(s.ptype,'')))
          when 'mobile'      then 'mobile'   when 'cell'     then 'mobile'
@@ -65,6 +67,17 @@ select s.row_no, s.folio_in, s.address, s.city, s.county, s.zip, s.phone, s.ptyp
          when 'house'       then 'landline'
          else null
        end                                                                       as phone_type,
+       case lower(btrim(coalesce(s.status_in,'')))
+         when 'correct' then 'correct'  when 'right'  then 'correct'
+         when 'good'    then 'correct'  when 'valid'  then 'correct'
+         when 'yes'     then 'correct'
+         when 'wrong'   then 'wrong'    when 'bad'    then 'wrong'
+         when 'incorrect' then 'wrong'  when 'no'     then 'wrong'
+         when 'dead'    then 'dead'     when 'disconnected' then 'dead'
+         when 'no longer in service' then 'dead'
+         when '' then null
+         else '?'                       -- anything else is reported, not guessed
+       end                                                                       as status,
        case when btrim(coalesce(s.folio_in,'')) <> '' then 'Parcel Number' else 'address' end as matched_by,
        case when btrim(coalesce(s.folio_in,'')) <> '' then bf.folio   else ba.folio   end as folio,
        case when btrim(coalesce(s.folio_in,'')) <> '' then bf.county  else ba.county  end as county_out,
@@ -112,6 +125,8 @@ select r.*,
          when not (length(r.digits) = 10
                    or (length(r.digits) = 11 and left(r.digits, 1) = '1'))
            then 'phone is not a 10 digit number'
+         when r.status = '?'
+           then 'status is not one of correct / wrong / dead' 
          when r.parcels = 0 and r.parcels_before_narrowing > 0
            then r.matched_by || ' exists, but the City/Zip/County in this row does not match BuyBox'
          when r.parcels = 0
@@ -126,9 +141,9 @@ from resolved r;
 -- one row per number per parcel; the fullest copy of a number wins
 create temp table to_load on commit drop as
 select distinct on (public.folio_norm(folio), public.county_norm(county), norm)
-       folio, county, phone_fmt as phone, phone_type, row_no, norm, matched_by
+       folio, county, phone_fmt as phone, phone_type, status, row_no, norm, matched_by
 from (
-  select c.folio, c.county_out as county, c.phone_type, c.row_no, c.matched_by,
+  select c.folio, c.county_out as county, c.phone_type, c.status, c.row_no, c.matched_by,
          right(c.digits, 10) as norm,
          '(' || substr(right(c.digits, 10), 1, 3) || ') '
              || substr(right(c.digits, 10), 4, 3) || '-'
@@ -137,7 +152,7 @@ from (
   where c.reject_reason is null
 ) x
 order by public.folio_norm(folio), public.county_norm(county), norm,
-         (phone_type is null), row_no;
+         (status is null), (phone_type is null), row_no;
 
 -- respect the 30-per-parcel cap, counting what is already stored
 create temp table ranked on commit drop as
@@ -152,15 +167,31 @@ left join (
 """ % {"narrow": NARROW})
 
 INSERT_SQL = f"""
-insert into public.property_phones (folio, county, phone, phone_type, slot, updated_by)
-select folio, county, phone, phone_type, already + rn, %s
+insert into public.property_phones (folio, county, phone, phone_type, status, slot, updated_by)
+select folio, county, phone, phone_type, status, already + rn, %s
 from ranked
 where already + rn <= {MAX_PHONES}
 on conflict (folio_key, county_key, phone_norm) do nothing;
 """
 
+# For numbers already on the property, the insert above does nothing, so the
+# status has to be applied separately. Only rows whose file gave a status are
+# touched, and an existing line type is left alone rather than overwritten.
+UPDATE_STATUS_SQL = """
+update public.property_phones p
+   set status = r.status,
+       phone_type = coalesce(p.phone_type, r.phone_type),
+       updated_by = %s
+  from ranked r
+ where p.folio_key  = public.folio_norm(r.folio)
+   and p.county_key = public.county_norm(r.county)
+   and p.phone_norm = r.norm
+   and r.status is not null
+   and p.status is distinct from r.status;
+"""
 
-def run(stage, *, conn_params, updated_by="upload", commit=False):
+
+def run(stage, *, conn_params, updated_by="upload", commit=False, set_status=False):
     """Resolve the staged rows; commit only when asked."""
     buf = io.StringIO()
     stage.to_csv(buf, index=False, header=False)
@@ -186,15 +217,20 @@ def run(stage, *, conn_params, updated_by="upload", commit=False):
             over_cap = cur.fetchone()[0]
 
             cur.execute("""
-                select row_no, folio_in, address, city, county, zip, phone, ptype, reject_reason
+                select row_no, folio_in, address, city, county, zip, phone, ptype, status_in, reject_reason
                 from classified where reject_reason is not null order by row_no""")
             rejects = cur.fetchall()
+
+            status_changed = 0
+            if set_status:
+                cur.execute(UPDATE_STATUS_SQL, (updated_by or None,))
+                status_changed = cur.rowcount
 
             cur.execute(INSERT_SQL, (updated_by or None,))
             inserted = cur.rowcount
 
             cur.execute("""
-                select r.matched_by, r.folio, r.county, r.phone, r.phone_type,
+                select r.matched_by, r.folio, r.county, r.phone, r.phone_type, r.status,
                        b."Property address", b."Full Name"
                 from ranked r
                 join public."BuyBox" b
@@ -213,5 +249,6 @@ def run(stage, *, conn_params, updated_by="upload", commit=False):
     return {
         "reasons": reasons, "loadable": loadable, "over_cap": over_cap,
         "rejects": rejects, "inserted": inserted, "by_key": by_key,
+        "status_changed": status_changed,
         "already_there": loadable - inserted, "preview": preview,
     }

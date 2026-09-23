@@ -151,22 +151,32 @@ reads as *Tax Delinquent*.
 | | | Divorce | 74 |
 | | | Syndicate | 22 |
 
-## Setting a phone status by hand
+## Phone statuses
 
-The **Phone status** page of the Streamlit app takes an address (or parcel number) and a
-phone number together:
+The **Phone status** page has two tabs.
 
-- the number is already on that property → its status is changed
-- it is not → it is added, carrying that status
+**Upload a file** — a CSV/XLSX with **Address** (or **Parcel Number**), **Phone** and
+**Status**; **Type**, **City**, **Zip** and **County** are optional.
+`samples/sample_statuses.csv` is an example. Per row:
 
-Statuses are the same three the website uses: ✅ Correct, ❌ Wrong, 💀 Dead, or none.
-City, Zip and County are there for the cases where an address or parcel number turns out
-to belong to more than one property — the page says so rather than picking one.
+- the number is already on that property → its status is set
+- it is not → the number is added carrying that status
+- a **blank** status adds the number without claiming anything about it, and never
+  clears a status that is already there
+- anything that is not correct / wrong / dead is **reported**, not guessed
 
-The page shows every number already on the property before you save, so you can see what
-you are changing.
+Accepted wordings: `correct`/`right`/`good`/`valid`/`yes`, `wrong`/`bad`/`incorrect`/`no`,
+`dead`/`disconnected`/`no longer in service`.
 
-## Mail dates
+An existing line type is left alone; a type is only filled in where there wasn't one.
+
+**One at a time** — the same thing for a single address and number, showing every number
+already on the property before you save.
+
+Both run through the same pipeline as the phone uploader, which also accepts an optional
+**Status** column now, so the three cannot drift apart.
+
+## Mail dates## Mail dates
 
 The mailing house reports the date each record actually went out.
 `Mailed.mailed_on` holds it, with `mailed_src` noting where the date came from.
@@ -253,7 +263,7 @@ The app has three pages, listed in its sidebar:
 | --- | --- |
 | Upload phone numbers | bulk load numbers against parcel numbers or addresses |
 | Mail dates | record when each record was mailed |
-| Phone status | set one number's status on one property, adding it if absent |
+| Phone status | bulk-apply statuses from a file, or set one by hand |
 
 Credentials come from `.streamlit/secrets.toml`, which is git-ignored — copy
 `.streamlit/secrets.toml.example` and fill in the password, and the sidebar fills

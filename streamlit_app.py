@@ -37,8 +37,8 @@ if not upload:
     st.info(
         "Upload a file with **Phone**, plus either a **Parcel Number** or an **Address** "
         "(a mix is fine — rows with a Parcel Number skip the address lookup). "
-        "**Phone Type**, **City**, **Zip** and **County** are optional; they only "
-        "matter for keys that turn out to be ambiguous."
+        "**Phone Type**, **Status**, **City**, **Zip** and **County** are optional; "
+        "a Status column is applied to numbers that are already on file too."
     )
     st.stop()
 
@@ -56,13 +56,14 @@ opts = [NONE] + cols
 
 st.subheader("Columns")
 st.caption("A row with a Parcel Number uses it directly. Only rows without one are looked up by address.")
-boxes = st.columns(7)
+boxes = st.columns(8)
 
 FIELDS = [
     ("folio",   "Parcel Number", ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
     ("address", "Address",    ("Address", "Property address", "PropertyAddress", "Street")),
     ("phone",   "Phone *",    ("Phone", "Phone Number", "Number")),
     ("ptype",   "Phone Type", ("Phone Type", "Type", "Line Type")),
+    ("status",  "Status",     ("Status", "Result", "Outcome", "Phone Status")),
     ("city",    "City",       ("City", "Property city")),
     ("zip",     "Zip",        ("Zip", "Property zip", "Zipcode", "Postal Code")),
     ("county",  "County",     ("County", "Property county")),
@@ -95,11 +96,13 @@ def show(res, committed):
     ok = res["inserted"]
     bad = sum(n for reason, n in res["reasons"] if reason)
 
-    a, b, c, d = st.columns(4)
-    a.metric("Matched to a parcel", f"{res['loadable']:,}")
-    b.metric("Inserted" if committed else "Would insert", f"{ok:,}")
-    c.metric("Already on file", f"{res['already_there']:,}")
-    d.metric("Rejected", f"{bad:,}")
+    cols = st.columns(5 if res.get("status_changed") else 4)
+    cols[0].metric("Matched to a parcel", f"{res['loadable']:,}")
+    cols[1].metric("Inserted" if committed else "Would insert", f"{ok:,}")
+    cols[2].metric("Already on file", f"{res['already_there']:,}")
+    cols[3].metric("Rejected", f"{bad:,}")
+    if res.get("status_changed"):
+        cols[4].metric("Statuses set", f"{res['status_changed']:,}")
 
     by = res.get("by_key") or {}
     if by:
@@ -112,7 +115,8 @@ def show(res, committed):
         st.subheader("What this attaches")
         st.dataframe(pd.DataFrame(
             res["preview"],
-            columns=["Matched by", "Parcel Number", "County", "Phone", "Type", "BuyBox address", "Owner"],
+            columns=["Matched by", "Parcel Number", "County", "Phone", "Type", "Status",
+                     "BuyBox address", "Owner"],
         ), use_container_width=True)
 
     if bad:
@@ -123,7 +127,7 @@ def show(res, committed):
         rej = pd.DataFrame(
             res["rejects"],
             columns=["Row", "Parcel Number", "Address", "City", "County", "Zip",
-                     "Phone", "Phone Type", "Reason"],
+                     "Phone", "Phone Type", "Status", "Reason"],
         )
         st.dataframe(rej.head(200), use_container_width=True)
         st.download_button("Download all rejected rows (CSV)",
@@ -138,7 +142,8 @@ def go(commit):
     try:
         with st.spinner("Resolving against BuyBox…" if not commit else "Importing…"):
             st.session_state["result"] = (
-                run(stage, conn_params=conn_params, updated_by=updated_by, commit=commit),
+                run(stage, conn_params=conn_params, updated_by=updated_by, commit=commit,
+                    set_status=bool(mapping.get("status"))),
                 commit,
             )
     except Exception as exc:                               # noqa: BLE001

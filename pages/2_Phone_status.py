@@ -1,122 +1,241 @@
 """
-Set the status of one phone number on one property.
+Set phone statuses — in bulk from a file, or one at a time.
 
-Enter an address (or parcel number) and a phone number: if that number is
-already on the property, its status is changed; if it is not, it is added
-carrying that status. All the work lives in status_update.py.
+A file carrying an address (or parcel number), a phone number and a status is
+applied row by row: the status is changed if that number is already on the
+property, and the number is added carrying the status if it is not. The same
+pipeline as the phone uploader, so the two cannot disagree.
 """
 
 import pandas as pd
 import streamlit as st
 
-from st_db import sidebar_connection
+from phone_import import MAX_PHONES, build_stage, run
+from st_db import guess, read_upload, sidebar_connection
 from status_update import NO_STATUS, STATUSES, apply_status, look_up, pretty_phone
 
 st.set_page_config(page_title="SOS Phones — Phone status", page_icon="✅", layout="wide")
 
+NONE = "— none —"
 conn_params = sidebar_connection()
 
-st.title("✅ Set a phone status")
-st.caption(
-    "Looks up the property and the number together. If that number is already on the "
-    "property its status is changed; if it is not, it is added with that status."
-)
+st.title("✅ Phone statuses")
 
-with st.form("lookup"):
-    a, b = st.columns([1, 2])
-    with a:
-        key_field = st.radio("Look the property up by", ["address", "parcel"],
-                             format_func=lambda v: "Address" if v == "address" else "Parcel Number",
-                             horizontal=True)
-    with b:
-        key_value = st.text_input("Address or Parcel Number",
-                                  placeholder="308 Cedar Rock Mdws  —  or  F# 077G222")
+bulk_tab, one_tab = st.tabs(["Upload a file", "One at a time"])
 
-    c, d, e, f = st.columns(4)
-    phone = c.text_input("Phone number", placeholder="(706) 836-9448")
-    city = d.text_input("City", placeholder="optional")
-    zipcode = e.text_input("Zip", placeholder="optional")
-    county = f.text_input("County", placeholder="optional")
-    st.caption("City, Zip and County are only needed when an address or parcel number "
-               "turns out to belong to more than one property.")
+# ==========================================================================
+# bulk
+# ==========================================================================
+with bulk_tab:
+    st.caption(
+        "A row whose number is already on the property has its status changed; "
+        "a number that is not there yet is added carrying that status. "
+        "Statuses are read as correct / wrong / dead — a blank one adds the number "
+        "without claiming anything about it, and anything else is reported."
+    )
 
-    if st.form_submit_button("Look it up", type="primary", use_container_width=True):
-        if not conn_params["password"]:
-            st.error("No database password — set it in the sidebar.")
+    upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"], key="status_file")
+    if not upload:
+        st.info("Upload a file with **Address** (or **Parcel Number**), **Phone** and "
+                "**Status**. **Type**, **City**, **Zip** and **County** are optional.")
+    else:
+        df = read_upload(upload)
+        st.success(f"Read **{len(df):,}** rows · {len(df.columns)} columns")
+        with st.expander("Preview the file", expanded=True):
+            st.dataframe(df.head(8), use_container_width=True)
+
+        cols = list(df.columns)
+        opts = [NONE] + cols
+        st.subheader("Columns")
+        boxes = st.columns(7)
+        FIELDS = [
+            ("address", "Address",       ("Address", "Property address", "Street")),
+            ("phone",   "Phone *",       ("Phone", "Phone Number", "Number")),
+            ("status",  "Status *",      ("Status", "Result", "Outcome", "Phone Status")),
+            ("ptype",   "Type",          ("Phone Type", "Type", "Line Type")),
+            ("folio",   "Parcel Number", ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
+            ("city",    "City",          ("City", "Property city")),
+            ("zip",     "Zip",           ("Zip", "Property zip", "Zipcode")),
+        ]
+        mapping = {}
+        for box, (field, label, names) in zip(boxes, FIELDS):
+            with box:
+                g = guess(cols, *names)
+                choice = st.selectbox(label, opts, index=opts.index(g) if g else 0, key=f"sc_{field}")
+                mapping[field] = None if choice == NONE else choice
+        mapping["county"] = guess(cols, "County", "Property county")
+
+        problems = []
+        if not mapping["phone"]:
+            problems.append("a **Phone** column")
+        if not mapping["status"]:
+            problems.append("a **Status** column")
+        if not mapping["address"] and not mapping["folio"]:
+            problems.append("either an **Address** or a **Parcel Number** column")
+        if problems:
+            st.error("This file still needs " + " and ".join(problems) + ".")
         else:
-            try:
-                st.session_state["status_hit"] = look_up(
-                    conn_params, key_field=key_field, key_value=key_value, phone=phone,
-                    city=city, county=county, zipcode=zipcode)
-                st.session_state.pop("status_done", None)
-            except Exception as exc:                       # noqa: BLE001
-                st.session_state.pop("status_hit", None)
-                st.error(f"Lookup failed: {exc}")
+            who = st.text_input("Record these as set by", value="status upload", max_chars=16)
+            stage = build_stage(df, mapping)
 
-hit = st.session_state.get("status_hit")
-if not hit:
-    st.stop()
+            def go_bulk(commit):
+                if not conn_params["password"]:
+                    st.error("No database password — set it in the sidebar.")
+                    return
+                try:
+                    with st.spinner("Matching against the phone list…" if not commit else "Saving statuses…"):
+                        st.session_state["bulk_status"] = (
+                            run(stage, conn_params=conn_params, updated_by=who or None,
+                                commit=commit, set_status=True), commit)
+                except Exception as exc:                   # noqa: BLE001
+                    st.session_state.pop("bulk_status", None)
+                    st.error(f"Import failed, nothing was written: {exc}")
 
-if hit.get("error"):
-    st.error(hit["error"])
-    st.stop()
+            st.divider()
+            left, right = st.columns(2)
+            if left.button("Check without saving", use_container_width=True, key="s_dry"):
+                go_bulk(False)
+            if right.button("Save statuses", type="primary", use_container_width=True, key="s_go"):
+                go_bulk(True)
 
-prop = hit["property"]
-existing = hit["existing"]
+    res_pair = st.session_state.get("bulk_status")
+    if res_pair:
+        res, committed = res_pair
+        bad = sum(n for reason, n in res["reasons"] if reason)
+        st.divider()
+        st.subheader("Saved" if committed else "Dry run — nothing was written")
 
-st.divider()
-st.subheader(prop["property_address"] or "(no property address)")
-st.caption(f"{prop['full_name'] or '—'}  ·  {prop['property_city'] or ''}  ·  "
-           f"{prop['folio']}  ·  {prop['county']} County")
+        a, b, c, d = st.columns(4)
+        a.metric("Statuses set on existing numbers", f"{res['status_changed']:,}")
+        b.metric("Numbers added", f"{res['inserted']:,}")
+        c.metric("Matched to a property", f"{res['loadable']:,}")
+        d.metric("Rejected", f"{bad:,}")
 
-if existing:
-    st.success(f"**{existing['phone']}** is already on this property — "
-               f"current status: **{STATUSES.get(existing['status'], NO_STATUS)}**")
-else:
-    st.warning(f"**{pretty_phone(hit['digits'])}** is not on this property yet. "
-               f"Saving will add it.")
+        if res["over_cap"]:
+            st.warning(f"{res['over_cap']:,} skipped — those properties already hold {MAX_PHONES} numbers.")
 
-if hit["phones"]:
-    st.dataframe(pd.DataFrame([{
-        "Phone": p["phone"],
-        "Type": p["phone_type"] or "",
-        "Status": STATUSES.get(p["status"], ""),
-        "Note": p["note"] or "",
-        "By": p["updated_by"] or "",
-    } for p in hit["phones"]]), use_container_width=True, hide_index=True)
-else:
-    st.caption("This property has no phone numbers yet.")
+        if res["preview"]:
+            st.dataframe(pd.DataFrame(res["preview"], columns=[
+                "Matched by", "Parcel Number", "County", "Phone", "Type", "Status",
+                "Property address", "Owner"]), use_container_width=True)
 
-st.divider()
-g, h, i = st.columns([2, 1, 1])
-choice = g.radio("Status to set", [*STATUSES, None],
-                 format_func=lambda v: STATUSES.get(v, NO_STATUS),
-                 horizontal=True,
-                 index=list(STATUSES).index(existing["status"])
-                 if existing and existing["status"] in STATUSES else 0)
-new_type = h.selectbox("Line type", ["", "mobile", "landline"],
-                       format_func=lambda v: {"": "— unchanged —", "mobile": "📱 Mobile",
-                                              "landline": "☎️ Landline"}[v],
-                       disabled=bool(existing))
-who = i.text_input("Set by", value="status", max_chars=16)
+        if bad:
+            st.subheader("Rejected rows")
+            for reason, n in res["reasons"]:
+                if reason:
+                    st.write(f"- **{n:,}** — {reason}")
+            rej = pd.DataFrame(res["rejects"], columns=[
+                "Row", "Parcel Number", "Address", "City", "County", "Zip",
+                "Phone", "Type", "Status", "Reason"])
+            st.dataframe(rej.head(200), use_container_width=True)
+            st.download_button("Download all rejected rows (CSV)",
+                               rej.to_csv(index=False).encode("utf-8"),
+                               file_name="status_rejects.csv", mime="text/csv")
 
-if st.button("Save status", type="primary", use_container_width=True):
-    try:
-        res = apply_status(conn_params, folio=prop["folio"], county=prop["county"],
-                           digits=hit["digits"], status=choice,
-                           phone_type=new_type or None, updated_by=who or None,
-                           commit=True)
-        st.session_state["status_done"] = res
-        # re-read so the table reflects what was just saved
-        st.session_state["status_hit"] = look_up(
-            conn_params, key_field=key_field or "address",
-            key_value=prop["folio"] if key_field == "parcel" else prop["property_address"],
-            phone=pretty_phone(hit["digits"]),
-            city=city, county=county, zipcode=zipcode)
-        st.rerun()
-    except Exception as exc:                               # noqa: BLE001
-        st.error(f"Could not save: {exc}")
+# ==========================================================================
+# one at a time
+# ==========================================================================
+with one_tab:
+    st.caption(
+        "Looks up the property and the number together. If that number is already on the "
+        "property its status is changed; if it is not, it is added with that status."
+    )
 
-done = st.session_state.get("status_done")
-if done:
-    st.success(f"{'Added the number with that status' if done['action'] == 'added' else 'Status updated'}.")
+    with st.form("lookup"):
+        a, b = st.columns([1, 2])
+        with a:
+            key_field = st.radio("Look the property up by", ["address", "parcel"],
+                                 format_func=lambda v: "Address" if v == "address" else "Parcel Number",
+                                 horizontal=True)
+        with b:
+            key_value = st.text_input("Address or Parcel Number",
+                                      placeholder="308 Cedar Rock Mdws  —  or  F# 077G222")
+
+        c, d, e, f = st.columns(4)
+        phone = c.text_input("Phone number", placeholder="(706) 836-9448")
+        city = d.text_input("City", placeholder="optional")
+        zipcode = e.text_input("Zip", placeholder="optional")
+        county = f.text_input("County", placeholder="optional")
+        st.caption("City, Zip and County are only needed when an address or parcel number "
+                   "turns out to belong to more than one property.")
+
+        if st.form_submit_button("Look it up", type="primary", use_container_width=True):
+            if not conn_params["password"]:
+                st.error("No database password — set it in the sidebar.")
+            else:
+                try:
+                    st.session_state["status_hit"] = look_up(
+                        conn_params, key_field=key_field, key_value=key_value, phone=phone,
+                        city=city, county=county, zipcode=zipcode)
+                    st.session_state.pop("status_done", None)
+                except Exception as exc:                       # noqa: BLE001
+                    st.session_state.pop("status_hit", None)
+                    st.error(f"Lookup failed: {exc}")
+
+    hit = st.session_state.get("status_hit")
+    if not hit:
+        st.stop()
+
+    if hit.get("error"):
+        st.error(hit["error"])
+        st.stop()
+
+    prop = hit["property"]
+    existing = hit["existing"]
+
+    st.divider()
+    st.subheader(prop["property_address"] or "(no property address)")
+    st.caption(f"{prop['full_name'] or '—'}  ·  {prop['property_city'] or ''}  ·  "
+               f"{prop['folio']}  ·  {prop['county']} County")
+
+    if existing:
+        st.success(f"**{existing['phone']}** is already on this property — "
+                   f"current status: **{STATUSES.get(existing['status'], NO_STATUS)}**")
+    else:
+        st.warning(f"**{pretty_phone(hit['digits'])}** is not on this property yet. "
+                   f"Saving will add it.")
+
+    if hit["phones"]:
+        st.dataframe(pd.DataFrame([{
+            "Phone": p["phone"],
+            "Type": p["phone_type"] or "",
+            "Status": STATUSES.get(p["status"], ""),
+            "Note": p["note"] or "",
+            "By": p["updated_by"] or "",
+        } for p in hit["phones"]]), use_container_width=True, hide_index=True)
+    else:
+        st.caption("This property has no phone numbers yet.")
+
+    st.divider()
+    g, h, i = st.columns([2, 1, 1])
+    choice = g.radio("Status to set", [*STATUSES, None],
+                     format_func=lambda v: STATUSES.get(v, NO_STATUS),
+                     horizontal=True,
+                     index=list(STATUSES).index(existing["status"])
+                     if existing and existing["status"] in STATUSES else 0)
+    new_type = h.selectbox("Line type", ["", "mobile", "landline"],
+                           format_func=lambda v: {"": "— unchanged —", "mobile": "📱 Mobile",
+                                                  "landline": "☎️ Landline"}[v],
+                           disabled=bool(existing))
+    who = i.text_input("Set by", value="status", max_chars=16)
+
+    if st.button("Save status", type="primary", use_container_width=True):
+        try:
+            res = apply_status(conn_params, folio=prop["folio"], county=prop["county"],
+                               digits=hit["digits"], status=choice,
+                               phone_type=new_type or None, updated_by=who or None,
+                               commit=True)
+            st.session_state["status_done"] = res
+            # re-read so the table reflects what was just saved
+            st.session_state["status_hit"] = look_up(
+                conn_params, key_field=key_field or "address",
+                key_value=prop["folio"] if key_field == "parcel" else prop["property_address"],
+                phone=pretty_phone(hit["digits"]),
+                city=city, county=county, zipcode=zipcode)
+            st.rerun()
+        except Exception as exc:                               # noqa: BLE001
+            st.error(f"Could not save: {exc}")
+
+    done = st.session_state.get("status_done")
+    if done:
+        st.success(f"{'Added the number with that status' if done['action'] == 'added' else 'Status updated'}.")
