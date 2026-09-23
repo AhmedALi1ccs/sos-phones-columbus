@@ -94,11 +94,17 @@ async function loadFacets() {
 }
 
 /* -------------------------------- rows -------------------------------- */
-/** "September 2026", or "29 Sep 2026" when the day matters. */
+/** 29 -> "29th", 1 -> "1st", 22 -> "22nd". */
+function ordinal(d) {
+  if (d % 100 >= 11 && d % 100 <= 13) return `${d}th`;
+  return `${d}${["th", "st", "nd", "rd"][d % 10] || "th"}`;
+}
+
+/** "September 2026" for the picker, "29th Sep 2026" for a row. */
 function monthLabel(d, withDay = false) {
   if (!d) return "";
   const [y, m, day] = String(d).split("-").map(Number);
-  return withDay ? `${day} ${MONTHS[m].slice(0, 3)} ${y}` : `${MONTHS[m]} ${y}`;
+  return withDay ? `${ordinal(day)} ${MONTHS[m].slice(0, 3)} ${y}` : `${MONTHS[m]} ${y}`;
 }
 
 function rowHtml(r) {

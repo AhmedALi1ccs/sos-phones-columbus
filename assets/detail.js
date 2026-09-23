@@ -175,11 +175,17 @@ function renderBody() {
 const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "Sep 2026" from the row's date. */
+/** 29 -> "29th", 1 -> "1st", 22 -> "22nd". */
+function ordinal(d) {
+  if (d % 100 >= 11 && d % 100 <= 13) return `${d}th`;
+  return `${d}${["th", "st", "nd", "rd"][d % 10] || "th"}`;
+}
+
+/** "29th Sep 2026" from the row's date. */
 function mailPeriod(d) {
   if (!d) return "";
-  const [y, m] = String(d).split("-").map(Number);
-  return `${MONTHS[m]} ${y}`;
+  const [y, m, day] = String(d).split("-").map(Number);
+  return `${ordinal(day)} ${MONTHS[m]} ${y}`;
 }
 
 async function loadMailed() {
