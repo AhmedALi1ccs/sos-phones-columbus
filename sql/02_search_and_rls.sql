@@ -384,13 +384,19 @@ $$;
 -- get_mail_history(folio) : rows from Mailed for the same parcel.
 -- ---------------------------------------------------------------
 create function public.get_mail_history(p_folio text)
-returns table (folio text, check_no text, mail_type text, property_address text)
+returns table (folio text, check_no text, mail_type text, property_address text,
+               vendor text, distress text, mail_month text, mail_year text, mailed_on date)
 language sql
 stable
 as $$
-  select m."FOLIO", m."Check", m."Type", m."Property address"
+  select m."FOLIO", m."Check", m."Type", m."Property address",
+         public.mailed_vendor_of(m."Vendor", m."Type"),
+         public.mailed_distress_of(m."Distress", m."Type"),
+         m."Month", m."Year", m.mailed_on
   from public."Mailed" m
   where public.folio_norm(m."FOLIO") = public.folio_norm(p_folio)
+  order by public.year_num(m."Year") desc nulls last,
+           public.month_num(m."Month") desc nulls last
   limit 20;
 $$;
 

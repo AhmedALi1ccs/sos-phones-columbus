@@ -132,14 +132,22 @@ A trigger refuses the 31st number for a parcel.
 
 ## The Mailing view
 
-`Type` packs three things into one string — `DM-OLM-Stack Aug26` is vendor `OLM`,
-distress `Stack`, period `Aug26`. `mail_vendor()` and `mail_distress()` pull the first
-two back out so they can be filtered on, folding the variants that reached the data:
-`Foreclosure`/`Foreclosures` are one thing, so are `CodeVio`/`CodeioVio`, and `TaxDel`
-reads as *Tax Delinquent*.
+`Mailed` carries **`Vendor`**, **`Distress`**, **`Month`** and **`Year`** as columns of
+their own. Upload files should fill those four; the page filters on each.
 
-4,999 older rows are just a month (`Jun-26`) and carry neither. They are offered as
-**(none)** in both pickers rather than hidden or guessed at.
+`Month` and `Year` are read however the file writes them — `Sep`, `September`, `9`, `09`
+and `26`, `2026` all work — and `month_num()`/`year_num()` turn them into one number to
+sort and filter by, so a file that mixes formats still orders correctly.
+
+The old `Type` column packed all four into one string (`DM-OLM-Stack Aug26`). It is kept
+and still unpicked as a **fallback**: `mailed_vendor_of()` and `mailed_distress_of()`
+take the column when it has a value and parse `Type` when it does not, so a row carrying
+only the old shape is not lost. The parsers still fold the variants that reached the
+data — `Foreclosure`/`Foreclosures` are one thing, so are `CodeVio`/`CodeioVio`, and
+`TaxDel` reads as *Tax Delinquent*.
+
+A row with no vendor or distress is offered as **(none)** in the pickers rather than
+hidden.
 
 | Vendor | | Mail distress | |
 | --- | --- | --- | --- |

@@ -39,7 +39,7 @@ drop function if exists public.list_mail_vendors();
 create function public.list_mail_vendors()
 returns table (vendor text, n bigint)
 language sql stable as $$
-  select coalesce(public.mail_vendor("Type"), '(none)'), count(*)
+  select coalesce(public.mailed_vendor_of("Vendor", "Type"), '(none)'), count(*)
   from public."Mailed" group by 1 order by 2 desc;
 $$;
 
@@ -47,8 +47,19 @@ drop function if exists public.list_mail_distresses();
 create function public.list_mail_distresses()
 returns table (distress text, n bigint)
 language sql stable as $$
-  select coalesce(public.mail_distress("Type"), '(none)'), count(*)
+  select coalesce(public.mailed_distress_of("Distress", "Type"), '(none)'), count(*)
   from public."Mailed" group by 1 order by 2 desc;
+$$;
+
+-- the month/year picker: one call, both dropdowns
+drop function if exists public.list_mail_periods();
+create function public.list_mail_periods()
+returns table (yr int, mon int, n bigint)
+language sql stable as $$
+  select public.year_num("Year"), public.month_num("Month"), count(*)
+  from public."Mailed"
+  group by 1, 2
+  order by 1 desc nulls last, 2 desc nulls last;
 $$;
 
 -- ---------------------------------------------------------------
@@ -57,12 +68,15 @@ $$;
 -- vendor / distress at all.
 -- ---------------------------------------------------------------
 drop function if exists public.mailed_where(text, text, text, date, date);
+drop function if exists public.mailed_where(text, text, text, date, date, int, int);
 create function public.mailed_where(
   q             text default null,
   p_vendor      text default null,
   p_distress    text default null,
   p_mailed_from date default null,
-  p_mailed_to   date default null
+  p_mailed_to   date default null,
+  p_month       int  default null,
+  p_year        int  default null
 )
 returns text
 language plpgsql
@@ -74,14 +88,21 @@ declare
 begin
   if coalesce(btrim(p_vendor), '') <> '' then
     w := w || case when p_vendor = '(none)'
-                   then ' and public.mail_vendor(m."Type") is null'
-                   else format(' and public.mail_vendor(m."Type") = %L', p_vendor) end;
+                   then ' and public.mailed_vendor_of(m."Vendor", m."Type") is null'
+                   else format(' and public.mailed_vendor_of(m."Vendor", m."Type") = %L', p_vendor) end;
   end if;
 
   if coalesce(btrim(p_distress), '') <> '' then
     w := w || case when p_distress = '(none)'
-                   then ' and public.mail_distress(m."Type") is null'
-                   else format(' and public.mail_distress(m."Type") = %L', p_distress) end;
+                   then ' and public.mailed_distress_of(m."Distress", m."Type") is null'
+                   else format(' and public.mailed_distress_of(m."Distress", m."Type") = %L', p_distress) end;
+  end if;
+
+  if p_month is not null then
+    w := w || format(' and public.month_num(m."Month") = %s', p_month);
+  end if;
+  if p_year is not null then
+    w := w || format(' and public.year_num(m."Year") = %s', p_year);
   end if;
 
   if p_mailed_from is not null then
@@ -108,6 +129,7 @@ $fn$;
 -- One page of the Mailing list, and its exact size.
 -- ---------------------------------------------------------------
 drop function if exists public.search_mailed(text, text, text, date, date, int, int);
+drop function if exists public.search_mailed(text, text, text, date, date, int, int, int, int);
 create function public.search_mailed(
   q             text default null,
   p_vendor      text default null,
@@ -115,7 +137,9 @@ create function public.search_mailed(
   p_mailed_from date default null,
   p_mailed_to   date default null,
   max_rows      int  default 15,
-  skip          int  default 0
+  skip          int  default 0,
+  p_month       int  default null,
+  p_year        int  default null
 )
 returns table (
   folio            text,
@@ -128,6 +152,8 @@ returns table (
   mail_type        text,
   vendor           text,
   distress         text,
+  mail_month       text,
+  mail_year        text,
   mailed_on        date,
   check_no         text
 )
@@ -144,12 +170,17 @@ begin
       select m.ctid as rid
       from public."Mailed" m
       where true %s
-      order by m.mailed_on desc nulls last, m."Property address" nulls last, m.ctid
+      order by public.year_num(m."Year") desc nulls last,
+               public.month_num(m."Month") desc nulls last,
+               m.mailed_on desc nulls last, m."Property address" nulls last, m.ctid
       limit %s offset %s
     )
     select m."FOLIO", b.county, m."Full Name",
            m."Property address", m."Property city", m."Property state", m."Property zip",
-           m."Type", public.mail_vendor(m."Type"), public.mail_distress(m."Type"),
+           m."Type",
+           public.mailed_vendor_of(m."Vendor", m."Type"),
+           public.mailed_distress_of(m."Distress", m."Type"),
+           m."Month", m."Year",
            m.mailed_on, m."Check"
     from public."Mailed" m
     join page on page.rid = m.ctid
@@ -157,21 +188,26 @@ begin
       select min(bb."Property county") as county from public."BuyBox" bb
       where public.folio_norm(bb."FOLIO") = public.folio_norm(m."FOLIO")
     ) b on true
-    order by m.mailed_on desc nulls last, m."Property address" nulls last, m.ctid
+    order by public.year_num(m."Year") desc nulls last,
+             public.month_num(m."Month") desc nulls last,
+             m.mailed_on desc nulls last, m."Property address" nulls last, m.ctid
   $q$,
-  public.mailed_where(q, p_vendor, p_distress, p_mailed_from, p_mailed_to),
+  public.mailed_where(q, p_vendor, p_distress, p_mailed_from, p_mailed_to, p_month, p_year),
   greatest(1, least(coalesce(max_rows, 15), 5000)),
   greatest(0, coalesce(skip, 0)));
 end
 $fn$;
 
 drop function if exists public.count_mailed(text, text, text, date, date);
+drop function if exists public.count_mailed(text, text, text, date, date, int, int);
 create function public.count_mailed(
   q             text default null,
   p_vendor      text default null,
   p_distress    text default null,
   p_mailed_from date default null,
-  p_mailed_to   date default null
+  p_mailed_to   date default null,
+  p_month       int  default null,
+  p_year        int  default null
 )
 returns bigint
 language plpgsql
@@ -180,7 +216,8 @@ as $fn$
 declare n bigint;
 begin
   execute format('select count(*) from public."Mailed" m where true %s',
-                 public.mailed_where(q, p_vendor, p_distress, p_mailed_from, p_mailed_to))
+                 public.mailed_where(q, p_vendor, p_distress, p_mailed_from, p_mailed_to,
+                                     p_month, p_year))
     into n;
   return coalesce(n, 0);
 end
@@ -190,8 +227,9 @@ grant execute on function public.mail_vendor(text)                            to
 grant execute on function public.mail_distress(text)                          to anon, authenticated;
 grant execute on function public.list_mail_vendors()                          to anon, authenticated;
 grant execute on function public.list_mail_distresses()                       to anon, authenticated;
-grant execute on function public.mailed_where(text, text, text, date, date)   to anon, authenticated;
-grant execute on function public.search_mailed(text, text, text, date, date, int, int) to anon, authenticated;
-grant execute on function public.count_mailed(text, text, text, date, date)   to anon, authenticated;
+grant execute on function public.mailed_where(text, text, text, date, date, int, int) to anon, authenticated;
+grant execute on function public.search_mailed(text, text, text, date, date, int, int, int, int) to anon, authenticated;
+grant execute on function public.count_mailed(text, text, text, date, date, int, int) to anon, authenticated;
+grant execute on function public.list_mail_periods()                          to anon, authenticated;
 
 commit;

@@ -172,6 +172,17 @@ function renderBody() {
 }
 
 /* ------------------------------- mailed ------------------------------- */
+const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Sep 2026" from whatever shape the row carries, else the old Type string. */
+function mailPeriod(r) {
+  const m = clean(r.mail_month), y = clean(r.mail_year);
+  if (!m && !y) return clean(r.mail_type);
+  const month = /^\d+$/.test(m) ? (MONTHS[Number(m)] || m) : m.slice(0, 3);
+  const year = /^\d{2}$/.test(y) ? `20${y}` : y;
+  return [month, year].filter(Boolean).join(" ");
+}
 async function loadMailed() {
   const box = document.getElementById("mailedBox");
   const { data, error } = await db.rpc("get_mail_history", { p_folio: property.folio });
@@ -179,7 +190,11 @@ async function loadMailed() {
   if (error)               { box.innerHTML = `<span class="badge no">Mail history unavailable</span>`; return; }
   if (!data || !data.length) { box.innerHTML = `<span class="badge no">✉️ Not mailed</span>`; return; }
 
-  const kinds = [...new Set(data.map((r) => clean(r.mail_type)).filter(Boolean))];
+  // one chip per mailing: who sent it, what list, and when
+  const kinds = [...new Set(data.map((r) => [
+    clean(r.vendor), clean(r.distress), mailPeriod(r)
+  ].filter(Boolean).join(" · ")).filter(Boolean))];
+
   box.innerHTML =
     `<span class="badge yes">✉️ Mailed ×${data.length}</span>` +
     (kinds.length ? `<div class="chips" style="margin-top:8px">${chipsHtml(kinds)}</div>` : "");
