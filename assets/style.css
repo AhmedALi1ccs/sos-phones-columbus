@@ -432,3 +432,8 @@ body.sidebar-collapsed .sidetoggle { align-self: center; }
 .chip.vendor { background: rgba(111,155,255,.16); border-color: transparent; color: var(--accent); }
 
 .phone-row .grow { flex: 1 1 auto; }
+
+/* a cold-call chip carries its source the way a distress chip carries its count */
+.chip.tel .n { color: var(--muted); font-size: 10.5px; font-weight: 600; }
+a.chip.tel { text-decoration: none; }
+a.chip.tel:hover { filter: brightness(1.15); text-decoration: none; }

@@ -134,6 +134,10 @@ function renderBody() {
           ${clean(p.folio) ? `<span class="badge no">Checking mail history…</span>`
                            : `<span class="badge no">✉️ No mail history</span>`}
         </div>
+        <div style="margin-top:10px" id="coldBox">
+          ${clean(p.folio) ? `<span class="badge no">Checking cold calling…</span>`
+                           : `<span class="badge no">📞 No cold calling</span>`}
+        </div>
       </section>
     </div>
 
@@ -151,14 +155,6 @@ function renderBody() {
       <h2>Phone numbers <span id="phoneCount" class="hint"></span></h2>
       <div class="card phones" id="phones">
         ${clean(p.folio) ? `<div class="phone-row"><span class="skeleton" style="width:200px"></span></div>`
-                         : `<div class="phone-row"><span class="hint">Unavailable — this record has no parcel number.</span></div>`}
-      </div>
-    </section>
-
-    <section class="section">
-      <h2>Cold calling <span id="coldCount" class="hint"></span></h2>
-      <div class="card" id="coldCalls">
-        ${clean(p.folio) ? `<div class="phone-row"><span class="skeleton" style="width:180px"></span></div>`
                          : `<div class="phone-row"><span class="hint">Unavailable — this record has no parcel number.</span></div>`}
       </div>
     </section>
@@ -187,34 +183,30 @@ async function loadMailed() {
 
 /* ---------------------------- cold calling ---------------------------- */
 async function loadColdCalls() {
-  const host = document.getElementById("coldCalls");
+  const box = document.getElementById("coldBox");
   // filtered on the county too: 139 parcel numbers are shared across counties,
   // and a list loaded against one of them is not about the other
   const { data, error } = await db
     .from("ColdCalling")
-    .select("phone, source, created_at")
+    .select("phone, source")
     .eq("folio_key", folioKey(property.folio))
     .eq("county_key", countyKey(property.county))
     .order("source", { ascending: true, nullsFirst: false })
     .order("id", { ascending: true });
 
-  if (error) {
-    host.innerHTML = `<div class="phone-row"><span class="err">${esc(error.message)}</span></div>`;
-    return;
-  }
-  if (!data.length) {
-    host.innerHTML = `<div class="phone-row"><span class="hint">No cold calling numbers for this parcel.</span></div>`;
-    return;
-  }
+  if (error)        { box.innerHTML = `<span class="badge no">Cold calling unavailable</span>`; return; }
+  if (!data.length) { box.innerHTML = `<span class="badge no">📞 Not cold called</span>`; return; }
 
-  document.getElementById("coldCount").textContent = `${data.length}`;
-  host.innerHTML = data.map((c) => `
-    <div class="phone-row">
-      <a class="num" href="tel:${esc(digits(c.phone))}">${esc(fmtPhone(c.phone))}</a>
-      ${clean(c.source) ? `<span class="chip">${esc(clean(c.source))}</span>` : ""}
-      <span class="grow"></span>
-      <span class="meta">added ${esc(relTime(c.created_at))}</span>
-    </div>`).join("");
+  const shown = data.slice(0, 8);
+  box.innerHTML =
+    `<span class="badge yes">📞 Cold called ×${data.length}</span>` +
+    `<div class="chips" style="margin-top:8px">` +
+    shown.map((c) => `
+      <a class="chip tel" href="tel:${esc(digits(c.phone))}"
+         title="${esc(clean(c.source) || "no source")}">${esc(fmtPhone(c.phone))}${
+        clean(c.source) ? ` <span class="n">${esc(clean(c.source))}</span>` : ""}</a>`).join("") +
+    (data.length > shown.length ? `<span class="chip">+${data.length - shown.length}</span>` : "") +
+    `</div>`;
 }
 
 /* ------------------------------- phones ------------------------------- */
