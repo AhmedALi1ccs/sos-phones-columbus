@@ -100,17 +100,24 @@ the property page says so plainly.
 > `buybox_lists_gin`) — Postgres does not rebuild them, and lookups will silently
 > return nothing.
 
-### After reloading BuyBox
+### After loading into BuyBox — refresh the distress counts
 
-The distress list and its counts are materialised, because computing them live is an
-11-second scan. Once new data is loaded, refresh them:
+The distress list and its counts are materialised, because computing them live is a ~6s
+scan of 286k rows. After new data lands:
 
 ```sql
 select public.refresh_distress_vocab();
 ```
 
-Until you do, the chips show the previous load's reasons and counts. Filtering, search
-and everything else read BuyBox directly and are never stale.
+**Until you do, the chip numbers are wrong and a new reason will not appear at all.**
+This has bitten once: `Pre-Probate` read 476 while the table held 6,660, and
+`Garnishment` was missing entirely. The page now prints *"counts as of …"* beside the
+filter heading, and says to refresh once they are over a day old, so it cannot go
+quietly stale again.
+
+**Filtering was never affected** — it runs live off `buybox_lists_gin`, so picking a chip
+has always returned the right records even when its number was out of date. Only the
+label is cached.
 
 ### `property_phones`
 

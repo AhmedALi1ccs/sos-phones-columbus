@@ -1,6 +1,6 @@
 import {
   db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml,
-  propertyHref, mountWho, toast
+  propertyHref, mountWho, toast, relTime
 } from "./db.js";
 import { exportCsv, EXPORT_CAP } from "./export.js";
 import { mountSidebar } from "./nav.js";
@@ -69,6 +69,17 @@ function applyField(f) {
 
 /* ----------------------------- distress chips ----------------------------- */
 async function loadDistresses() {
+  // The counts are cached (computing them live is a ~6s scan), so say how old
+  // they are rather than letting them go quietly wrong.
+  db.from("vocab_meta").select("refreshed_at").maybeSingle().then(({ data }) => {
+    if (!data || !data.refreshed_at) return;
+    const age = (Date.now() - new Date(data.refreshed_at).getTime()) / 36e5;
+    const when = relTime(data.refreshed_at);
+    countEl.insertAdjacentHTML("afterend",
+      `<span class="hint" id="vocabAge" style="margin-left:4px">counts as of ${esc(when)}${
+        age > 24 ? " — run refresh_distress_vocab() to update" : ""}</span>`);
+  });
+
   const { data, error } = await db.rpc("list_distresses");
   if (error) {
     chipsEl.innerHTML = `<span class="hint">Could not load distress reasons: ${esc(error.message)}</span>`;
