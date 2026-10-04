@@ -170,12 +170,20 @@ async function loadTotal() {
   renderSummary();
   renderPager();
 
-  const { data, error } = await db.rpc("count_properties", {
-    q: currentQuery || null,
-    field: currentField,
-    p_lists: selected.size ? keys() : null
-  });
-  if (error || mine !== countSeq) return;
+  const args = { q: currentQuery || null, field: currentField, p_lists: selected.size ? keys() : null };
+  let { data, error } = await db.rpc("count_properties", args);
+  // Counting a broad search reads most of the table, and on a cold cache that
+  // can just miss the 3s timeout; the second try runs warm in under a second.
+  for (let tries = 0; isTimeout(error) && tries < 2 && mine === countSeq; tries++) {
+    ({ data, error } = await db.rpc("count_properties", args));
+  }
+  if (mine !== countSeq) return;
+  if (error) {
+    summaryEl.textContent = isTimeout(error)
+      ? "Too many matches to count right now — add a word or a distress filter to narrow it."
+      : `Could not count the matches: ${error.message}`;
+    return;
+  }
 
   total = Number(data);
   countEl.textContent = selected.size ? `${total.toLocaleString()} record${total === 1 ? "" : "s"}` : "";
