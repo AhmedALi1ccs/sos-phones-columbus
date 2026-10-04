@@ -1,6 +1,6 @@
 import {
   db, configured, configBanner, esc, clean, cityLine, splitList, chipsHtml,
-  propertyHref, mountWho, toast, relTime
+  propertyHref, mountWho, toast, relTime, isTimeout
 } from "./db.js";
 import { exportCsv, EXPORT_CAP } from "./export.js";
 import { mountSidebar } from "./nav.js";
@@ -11,14 +11,14 @@ const PER_PAGE = 15;
 const FIELDS = {
   all:      { placeholder: "Search by property address, owner name, mailing address…",
               hint: "Searches every field. Partial matches are fine.", min: 3 },
-  property: { placeholder: "e.g. 2451 Juniper Dr, or just Juniper",
+  property: { placeholder: "e.g. 1570 Franklin Ave, or just Franklin",
               hint: "Property address, city, state or zip only.", min: 3 },
-  name:     { placeholder: "e.g. Mildred Brown, or just Brown",
+  name:     { placeholder: "e.g. Gary Janchenko, or just Janchenko",
               hint: "Owner name only — full, first or last.", min: 3 },
-  mailing:  { placeholder: "e.g. 3540 Wheeler Rd",
+  mailing:  { placeholder: "e.g. 815 N High St",
               hint: "Mailing address, city, state or zip only.", min: 3 },
-  folio:    { placeholder: "e.g. F# 077G222, or just 077G222",
-              hint: "Parcel number. The “F# ” prefix is optional, and a fragment works.", min: 2 }
+  parcel:   { placeholder: "e.g. 010-000001-00, or just 000001",
+              hint: "Parcel number. Dashes are optional, and a fragment works.", min: 3 }
 };
 
 const qEl       = document.getElementById("q");
@@ -32,10 +32,6 @@ const chipsEl   = document.getElementById("distressChips");
 const countEl   = document.getElementById("filterCount");
 const clearBtn  = document.getElementById("clearFilters");
 const exportBtn = document.getElementById("exportBtn");
-// the mail filters live on the Mailing page now; the URL still carries a
-// window so a link like ?mf=2026-08-01 keeps working
-const urlParams = new URLSearchParams(location.search);
-const mailWindow = { from: urlParams.get("mf") || null, to: urlParams.get("mt") || null };
 
 mountSidebar("search");
 mountWho(document.getElementById("whoHost"));
@@ -52,11 +48,9 @@ let total = null;
 let currentQuery = "";
 let currentField = "all";
 let selected = new Set();
+let ranked = false;      // what the database actually sorted by, from the last page
 
 const keys = () => [...selected];
-const mailedFrom = () => mailWindow.from;
-const mailedTo   = () => mailWindow.to;
-const hasMailWindow = () => Boolean(mailedFrom() || mailedTo());
 const termIsUsable = () => qEl.value.trim().length >= FIELDS[currentField].min;
 const totalPages = () => (total === null ? null : Math.max(1, Math.ceil(total / PER_PAGE)));
 
@@ -107,7 +101,7 @@ function resultHtml(r) {
   const phones = Number(r.phone_count) || 0;
   const stack = Number(r.list_stack) || 0;
   return `
-    <a class="result" href="${propertyHref(r)}">
+    <a class="result" href="${propertyHref(r.parcel)}">
       <span class="line1">
         <span class="addr">${esc(addr)}</span>
         <span class="name">${esc(clean(r.full_name))}</span>
@@ -116,7 +110,7 @@ function resultHtml(r) {
         ${esc(cityLine(r.property_city, r.property_state, r.property_zip))}
         &nbsp;·&nbsp; Mailing: ${esc(clean(r.mailing_address) || "—")}${
           clean(r.mailing_city) ? ", " + esc(cityLine(r.mailing_city, r.mailing_state, r.mailing_zip)) : ""}
-        ${clean(r.folio) ? `&nbsp;·&nbsp; ${esc(clean(r.folio))}` : ""}
+        ${clean(r.parcel) ? `&nbsp;·&nbsp; ${esc(clean(r.parcel))}` : ""}
       </span>
       <span class="chips">
         ${stack ? `<span class="chip stack" title="Distress reasons on this record">${stack}</span>` : ""}
@@ -136,15 +130,17 @@ async function loadPage() {
     max_rows: PER_PAGE,
     skip: page * PER_PAGE,
     field: currentField,
-    p_lists: selected.size ? keys() : null,
-    p_mailed_from: mailedFrom(),
-    p_mailed_to: mailedTo()
+    p_lists: selected.size ? keys() : null
   });
 
   if (mine !== pageSeq) return;                 // a newer request already fired
 
   if (error) {
-    setStatus(`<span class="err" style="display:block">Search failed: ${esc(error.message)}</span>`, true);
+    // a broad search sorted by stack gets slower the deeper the page
+    const msg = isTimeout(error) && page > 0
+      ? "That page is too deep for such a broad search. Add a word or a distress filter to narrow it."
+      : `Search failed: ${error.message}`;
+    setStatus(`<span class="err" style="display:block">${esc(msg)}</span>`, true);
     resultsEl.innerHTML = "";
     pagerEl.innerHTML = "";
     return;
@@ -161,6 +157,7 @@ async function loadPage() {
   }
 
   setStatus("");
+  ranked = Boolean(data[0].ranked);
   resultsEl.innerHTML = data.map(resultHtml).join("");
   renderSummary(data.length);
   renderPager();
@@ -176,9 +173,7 @@ async function loadTotal() {
   const { data, error } = await db.rpc("count_properties", {
     q: currentQuery || null,
     field: currentField,
-    p_lists: selected.size ? keys() : null,
-    p_mailed_from: mailedFrom(),
-    p_mailed_to: mailedTo()
+    p_lists: selected.size ? keys() : null
   });
   if (error || mine !== countSeq) return;
 
@@ -203,12 +198,12 @@ function renderSummary(shown) {
     return;
   }
   const to = Math.min(total, from + PER_PAGE - 1);
-  const sortedBy = currentQuery ? "best match" : "most distress reasons";
-  const window = hasMailWindow()
-    ? `, mailed ${mailedFrom() ? "from " + mailedFrom() : ""}${mailedFrom() && mailedTo() ? " " : ""}${mailedTo() ? "to " + mailedTo() : ""}`
-    : "";
+  // too many matches to rank: the database falls back to the stack order
+  const sortedBy = ranked ? "best match"
+    : currentQuery ? "most distress reasons (too many matches to rank — add a word to narrow it)"
+    : "most distress reasons";
   summaryEl.innerHTML = total === 0 ? ""
-    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b>${window}, sorted by ${sortedBy}.`;
+    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b>, sorted by ${sortedBy}.`;
 }
 
 /** 1 … 7 8 [9] 10 11 … 19,063 */
@@ -260,8 +255,6 @@ function syncUrl() {
   if (term) url.searchParams.set("q", term); else url.searchParams.delete("q");
   if (currentField !== "all") url.searchParams.set("f", currentField); else url.searchParams.delete("f");
   if (selected.size) url.searchParams.set("d", keys().join("|")); else url.searchParams.delete("d");
-  if (mailedFrom()) url.searchParams.set("mf", mailedFrom()); else url.searchParams.delete("mf");
-  if (mailedTo()) url.searchParams.set("mt", mailedTo()); else url.searchParams.delete("mt");
   if (page > 0) url.searchParams.set("p", page + 1); else url.searchParams.delete("p");
   history.replaceState(null, "", url);
 }
@@ -317,8 +310,6 @@ exportBtn.addEventListener("click", async () => {
     query: currentQuery,
     field: currentField,
     keys: keys(),
-    mailedFrom: mailedFrom(),
-    mailedTo: mailedTo(),
     onProgress: (n) => { exportBtn.textContent = `Exporting… ${n.toLocaleString()}`; }
   });
   exportBtn.textContent = label;

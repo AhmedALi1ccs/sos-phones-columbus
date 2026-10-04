@@ -21,10 +21,10 @@
   <main class="content">
   <div id="banner"></div>
   <h1 class="addr">Settings</h1>
-  <p class="sub">Records removed here are moved to <code>notBuyBox</code>, not deleted, and can be put back.</p>
+  <p class="sub">Records removed here are moved to <code>notBuybox</code>, not deleted, and can be put back.</p>
 
   <section class="card panel section" style="margin-top:20px">
-    <h2>Remove from BuyBox</h2>
+    <h2>Remove from Buybox</h2>
     <p class="hint" style="margin:0 0 14px">
       Choose one field to match on, then enter a value. You will be shown how many
       records match before anything is moved.
@@ -32,12 +32,12 @@
 
     <div class="removebar">
       <select id="field" class="fieldsel" aria-label="Match on">
-        <option value="folio">Parcel Number</option>
+        <option value="parcel">Parcel Number</option>
         <option value="address">Address</option>
         <option value="zip">Property zip</option>
       </select>
       <span class="divider"></span>
-      <input type="text" id="value" autocomplete="off" placeholder="e.g. F# 077G222">
+      <input type="text" id="value" autocomplete="off" placeholder="e.g. 010-000001-00">
       <button class="btn danger" id="removeBtn">Remove…</button>
     </div>
     <p class="hint" id="fieldHint" style="margin-top:10px"></p>

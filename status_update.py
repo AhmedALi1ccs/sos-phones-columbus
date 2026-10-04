@@ -33,37 +33,31 @@ def pretty_phone(d):
     return f"({d[0:3]}) {d[3:6]}-{d[6:]}" if len(d) == 10 else d
 
 
-def _resolve_sql(by_parcel, city, county, zipcode):
+def _resolve_sql(by_parcel, city, zipcode):
     """
     Build the parcel lookup. The narrowing clauses are added only when they are
     actually given: written as `%(city)s = '' or ...` they would sit in the
     predicate as an OR and cost the query its index.
     """
-    key = ('public.folio_norm(b."FOLIO") = public.folio_norm(%(key)s)' if by_parcel
-           else 'public.addr_norm(b."Property address") = public.addr_norm(%(key)s)')
-    where = [key, """coalesce(btrim(b."FOLIO"), '') <> ''"""]
+    where = [('public.parcel_norm(b."Parcel Number") = public.parcel_norm(%(key)s)' if by_parcel
+              else 'public.addr_norm(b."Property address") = public.addr_norm(%(key)s)')]
     if city:
-        where.append('public.county_norm(b."Property city") = public.county_norm(%(city)s)')
-    if county:
-        where.append('public.county_norm(b."Property county") = public.county_norm(%(county)s)')
+        where.append('lower(btrim(b."Property city")) = lower(btrim(%(city)s))')
     if zipcode:
         where.append('btrim(coalesce(b."Property zip", \'\')) = btrim(%(zip)s)')
 
     return f"""
-        select min(b."FOLIO")                        as folio,
-               min(b."Property county")              as county,
+        select min(b."Parcel Number")                as parcel,
                min(b."Property address")             as property_address,
                min(b."Property city")                as property_city,
                min(b."Full Name")                    as full_name,
-               count(distinct (public.folio_norm(b."FOLIO"),
-                               public.county_norm(b."Property county"))) as parcels
-        from public."BuyBox" b
+               count(*)                              as parcels
+        from public."Buybox" b
         where {' and '.join(where)}
     """
 
 
-def look_up(conn_params, *, key_field, key_value, phone,
-            city="", county="", zipcode=""):
+def look_up(conn_params, *, key_field, key_value, phone, city="", zipcode=""):
     """
     Resolve the property and report what is already on it.
 
@@ -77,29 +71,26 @@ def look_up(conn_params, *, key_field, key_value, phone,
     if not digits:
         return {"error": "That phone number is not 10 digits."}
 
-    args = {"key": key_value.strip(), "city": city.strip(),
-            "county": county.strip(), "zip": zipcode.strip()}
+    args = {"key": key_value.strip(), "city": city.strip(), "zip": zipcode.strip()}
 
     conn = psycopg2.connect(**conn_params)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(_resolve_sql(key_field == "parcel", args["city"],
-                                     args["county"], args["zip"]), args)
+            cur.execute(_resolve_sql(key_field == "parcel", args["city"], args["zip"]), args)
             hit = cur.fetchone()
 
             if not hit or not hit["parcels"]:
-                return {"error": f"No property in BuyBox matches that "
+                return {"error": f"No property in Buybox matches that "
                                  f"{'parcel number' if key_field == 'parcel' else 'address'}."}
             if hit["parcels"] > 1:
                 return {"error": f"That matches {hit['parcels']} different properties. "
-                                 f"Add a City, Zip or County to narrow it."}
+                                 f"Add a City or Zip to narrow it."}
 
             cur.execute("""
                 select id, phone, phone_type, status, note, updated_by, updated_at
                 from public.property_phones
-                where folio_key = public.folio_norm(%s)
-                  and county_key = public.county_norm(%s)
-                order by slot nulls last, id""", (hit["folio"], hit["county"]))
+                where parcel_key = public.parcel_norm(%s)
+                order by slot nulls last, id""", (hit["parcel"],))
             phones = cur.fetchall()
     finally:
         conn.close()
@@ -110,7 +101,7 @@ def look_up(conn_params, *, key_field, key_value, phone,
             "phones": [dict(p) for p in phones]}
 
 
-def apply_status(conn_params, *, folio, county, digits, status,
+def apply_status(conn_params, *, parcel, digits, status,
                  phone_type=None, updated_by=None, commit=True):
     """
     Set the status, adding the number to the property if it is not there yet.
@@ -122,25 +113,22 @@ def apply_status(conn_params, *, folio, county, digits, status,
             cur.execute("""
                 update public.property_phones
                    set status = %s, updated_by = %s
-                 where folio_key = public.folio_norm(%s)
-                   and county_key = public.county_norm(%s)
+                 where parcel_key = public.parcel_norm(%s)
                    and phone_norm = %s
-                returning id""", (status, updated_by, folio, county, digits))
+                returning id""", (status, updated_by, parcel, digits))
             row = cur.fetchone()
             action = "updated"
 
             if row is None:
                 cur.execute("""
                     insert into public.property_phones
-                        (folio, county, phone, phone_type, status, slot, updated_by)
-                    values (%s, %s, %s, %s, %s,
+                        (parcel, phone, phone_type, status, slot, updated_by)
+                    values (%s, %s, %s, %s,
                             coalesce((select max(slot) from public.property_phones
-                                       where folio_key = public.folio_norm(%s)
-                                         and county_key = public.county_norm(%s)), 0) + 1,
+                                       where parcel_key = public.parcel_norm(%s)), 0) + 1,
                             %s)
                     returning id""",
-                    (folio, county, pretty_phone(digits), phone_type, status,
-                     folio, county, updated_by))
+                    (parcel, pretty_phone(digits), phone_type, status, parcel, updated_by))
                 row = cur.fetchone()
                 action = "added"
 

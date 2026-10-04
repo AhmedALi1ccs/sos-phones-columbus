@@ -12,7 +12,7 @@ export function configBanner(host) {
   host.insertAdjacentHTML("afterbegin", `
     <div class="err">
       <strong>Not connected yet.</strong> Open <code>config.js</code> and paste your Supabase
-      <code>anon</code> key (Supabase dashboard → Project Settings → API → anon / public).
+      publishable key (Supabase dashboard → Project Settings → API).
     </div>`);
 }
 
@@ -37,24 +37,14 @@ export const esc = (s) =>
 
 export const clean = (s) => (s == null ? "" : String(s).trim());
 
-/** Must match folio_norm()/county_norm() in sql/01_schema.sql exactly. */
-export function folioKey(f) {
-  return String(f ?? "").replace(/^\s*[Ff]\s*#\s*/, "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-}
-export function countyKey(c) {
-  return String(c ?? "").trim().toLowerCase();
+/** Must match parcel_norm() in sql/01_schema.sql exactly. */
+export function parcelKey(p) {
+  return String(p ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 
-/** The href for a property: keyed by parcel, so it survives a BuyBox reload. */
-export function propertyHref(row) {
-  const p = new URLSearchParams();
-  if (clean(row.folio)) {
-    p.set("folio", clean(row.folio));
-    if (clean(row.county)) p.set("county", clean(row.county));
-  } else {
-    p.set("id", row.id);          // 712 rows have no FOLIO to key on
-  }
-  return "property.html?" + p.toString();
+/** The href for a property: keyed by parcel number, so it survives a Buybox reload. */
+export function propertyHref(parcel) {
+  return "property.html?parcel=" + encodeURIComponent(clean(parcel));
 }
 
 export function digits(s) {
@@ -82,10 +72,10 @@ export function chipsHtml(items, cls = "chip") {
   return items.map((x) => `<span class="${cls}">${esc(x)}</span>`).join("");
 }
 
-/** Sale Date arrives either as an Excel serial ("44362") or junk ("0000-00-00"). */
+/** Sale Date arrives as ISO ("2021-12-02"), an Excel serial ("44362") or junk ("0000-00-00"). */
 export function fmtSaleDate(raw) {
   const s = clean(raw);
-  if (!s || /^0+[-/]?/.test(s) && !/[1-9]/.test(s.replace(/[-/]/g, ""))) return "";
+  if (!s || !/[1-9]/.test(s.replace(/[-/]/g, ""))) return "";
   if (/^\d{4,6}$/.test(s)) {
     const n = Number(s);
     if (n > 20000 && n < 60000) {
@@ -94,6 +84,30 @@ export function fmtSaleDate(raw) {
     }
   }
   return s;
+}
+
+/** "407000" or "$150,400 " -> "$407,000"; nothing for blanks and zeros. */
+export function fmtMoney(raw) {
+  const s = clean(raw);
+  const n = Number(s.replace(/[$,\s]/g, ""));
+  if (!s || !Number.isFinite(n) || n === 0) return "";
+  return "$" + n.toLocaleString();
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"];
+
+/** "2026-07-01" -> "July 2026"; short -> "Jul 2026". */
+export function monthLabel(iso, short = false) {
+  if (!iso) return "";
+  const [y, m] = String(iso).split("-").map(Number);
+  const name = MONTHS[m - 1] || "";
+  return `${short ? name.slice(0, 3) : name} ${y}`;
+}
+
+/** A Postgres statement timeout, as opposed to any other failure. */
+export function isTimeout(error) {
+  return Boolean(error) && (error.code === "57014" || /statement timeout/i.test(error.message || ""));
 }
 
 export function relTime(iso) {

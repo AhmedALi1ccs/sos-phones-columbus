@@ -37,7 +37,7 @@ with bulk_tab:
     upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"], key="status_file")
     if not upload:
         st.info("Upload a file with **Address** (or **Parcel Number**), **Phone** and "
-                "**Status**. **Type**, **City**, **Zip** and **County** are optional.")
+                "**Status**. **Type**, **City** and **Zip** are optional.")
     else:
         df = read_upload(upload)
         st.success(f"Read **{len(df):,}** rows · {len(df.columns)} columns")
@@ -53,7 +53,7 @@ with bulk_tab:
             ("phone",   "Phone *",       ("Phone", "Phone Number", "Number")),
             ("status",  "Status *",      ("Status", "Result", "Outcome", "Phone Status")),
             ("ptype",   "Type",          ("Phone Type", "Type", "Line Type")),
-            ("folio",   "Parcel Number", ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
+            ("parcel",  "Parcel Number", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")),
             ("city",    "City",          ("City", "Property city")),
             ("zip",     "Zip",           ("Zip", "Property zip", "Zipcode")),
         ]
@@ -63,14 +63,13 @@ with bulk_tab:
                 g = guess(cols, *names)
                 choice = st.selectbox(label, opts, index=opts.index(g) if g else 0, key=f"sc_{field}")
                 mapping[field] = None if choice == NONE else choice
-        mapping["county"] = guess(cols, "County", "Property county")
 
         problems = []
         if not mapping["phone"]:
             problems.append("a **Phone** column")
         if not mapping["status"]:
             problems.append("a **Status** column")
-        if not mapping["address"] and not mapping["folio"]:
+        if not mapping["address"] and not mapping["parcel"]:
             problems.append("either an **Address** or a **Parcel Number** column")
         if problems:
             st.error("This file still needs " + " and ".join(problems) + ".")
@@ -116,7 +115,7 @@ with bulk_tab:
 
         if res["preview"]:
             st.dataframe(pd.DataFrame(res["preview"], columns=[
-                "Matched by", "Parcel Number", "County", "Phone", "Type", "Status",
+                "Matched by", "Parcel Number", "Phone", "Type", "Status",
                 "Property address", "Owner"]), use_container_width=True)
 
         if bad:
@@ -125,7 +124,7 @@ with bulk_tab:
                 if reason:
                     st.write(f"- **{n:,}** — {reason}")
             rej = pd.DataFrame(res["rejects"], columns=[
-                "Row", "Parcel Number", "Address", "City", "County", "Zip",
+                "Row", "Parcel Number", "Address", "City", "Zip",
                 "Phone", "Type", "Status", "Reason"])
             st.dataframe(rej.head(200), use_container_width=True)
             st.download_button("Download all rejected rows (CSV)",
@@ -149,15 +148,14 @@ with one_tab:
                                  horizontal=True)
         with b:
             key_value = st.text_input("Address or Parcel Number",
-                                      placeholder="308 Cedar Rock Mdws  —  or  F# 077G222")
+                                      placeholder="1570 Franklin Ave  —  or  010-000004-00")
 
-        c, d, e, f = st.columns(4)
-        phone = c.text_input("Phone number", placeholder="(706) 836-9448")
+        c, d, e = st.columns(3)
+        phone = c.text_input("Phone number", placeholder="(614) 555-0142")
         city = d.text_input("City", placeholder="optional")
         zipcode = e.text_input("Zip", placeholder="optional")
-        county = f.text_input("County", placeholder="optional")
-        st.caption("City, Zip and County are only needed when an address or parcel number "
-                   "turns out to belong to more than one property.")
+        st.caption("City and Zip are only needed when an address turns out to belong "
+                   "to more than one property.")
 
         if st.form_submit_button("Look it up", type="primary", use_container_width=True):
             if not conn_params["password"]:
@@ -166,7 +164,7 @@ with one_tab:
                 try:
                     st.session_state["status_hit"] = look_up(
                         conn_params, key_field=key_field, key_value=key_value, phone=phone,
-                        city=city, county=county, zipcode=zipcode)
+                        city=city, zipcode=zipcode)
                     st.session_state.pop("status_done", None)
                 except Exception as exc:                       # noqa: BLE001
                     st.session_state.pop("status_hit", None)
@@ -186,7 +184,7 @@ with one_tab:
     st.divider()
     st.subheader(prop["property_address"] or "(no property address)")
     st.caption(f"{prop['full_name'] or '—'}  ·  {prop['property_city'] or ''}  ·  "
-               f"{prop['folio']}  ·  {prop['county']} County")
+               f"{prop['parcel']}")
 
     if existing:
         st.success(f"**{existing['phone']}** is already on this property — "
@@ -221,7 +219,7 @@ with one_tab:
 
     if st.button("Save status", type="primary", use_container_width=True):
         try:
-            res = apply_status(conn_params, folio=prop["folio"], county=prop["county"],
+            res = apply_status(conn_params, parcel=prop["parcel"],
                                digits=hit["digits"], status=choice,
                                phone_type=new_type or None, updated_by=who or None,
                                commit=True)
@@ -229,9 +227,9 @@ with one_tab:
             # re-read so the table reflects what was just saved
             st.session_state["status_hit"] = look_up(
                 conn_params, key_field=key_field or "address",
-                key_value=prop["folio"] if key_field == "parcel" else prop["property_address"],
+                key_value=prop["parcel"] if key_field == "parcel" else prop["property_address"],
                 phone=pretty_phone(hit["digits"]),
-                city=city, county=county, zipcode=zipcode)
+                city=city, zipcode=zipcode)
             st.rerun()
         except Exception as exc:                               # noqa: BLE001
             st.error(f"Could not save: {exc}")

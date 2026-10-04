@@ -27,7 +27,7 @@ conn_params = sidebar_connection()
 # --------------------------------------------------------------------------
 st.title("📞 Upload phone numbers")
 st.caption(
-    "Rows carrying a Parcel Number use it as-is; the rest are resolved against BuyBox by "
+    "Rows carrying a Parcel Number use it as-is; the rest are resolved against Buybox by "
     "address. Anything missing, unknown, or shared by more than one parcel is "
     "reported instead of guessed at."
 )
@@ -37,7 +37,7 @@ if not upload:
     st.info(
         "Upload a file with **Phone**, plus either a **Parcel Number** or an **Address** "
         "(a mix is fine — rows with a Parcel Number skip the address lookup). "
-        "**Phone Type**, **Status**, **City**, **Zip** and **County** are optional; "
+        "**Phone Type**, **Status**, **City** and **Zip** are optional; "
         "a Status column is applied to numbers that are already on file too."
     )
     st.stop()
@@ -56,17 +56,16 @@ opts = [NONE] + cols
 
 st.subheader("Columns")
 st.caption("A row with a Parcel Number uses it directly. Only rows without one are looked up by address.")
-boxes = st.columns(8)
+boxes = st.columns(7)
 
 FIELDS = [
-    ("folio",   "Parcel Number", ("FOLIO", "Folio", "Parcel", "Parcel Number", "APN")),
+    ("parcel",  "Parcel Number", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")),
     ("address", "Address",    ("Address", "Property address", "PropertyAddress", "Street")),
     ("phone",   "Phone *",    ("Phone", "Phone Number", "Number")),
     ("ptype",   "Phone Type", ("Phone Type", "Type", "Line Type")),
     ("status",  "Status",     ("Status", "Result", "Outcome", "Phone Status")),
     ("city",    "City",       ("City", "Property city")),
     ("zip",     "Zip",        ("Zip", "Property zip", "Zipcode", "Postal Code")),
-    ("county",  "County",     ("County", "Property county")),
 ]
 
 mapping = {}
@@ -79,7 +78,7 @@ for box, (field, label, names) in zip(boxes, FIELDS):
 problems = []
 if not mapping["phone"]:
     problems.append("a **Phone** column")
-if not mapping["folio"] and not mapping["address"]:
+if not mapping["parcel"] and not mapping["address"]:
     problems.append("either a **Parcel Number** or an **Address** column")
 if problems:
     st.error("This file still needs " + " and ".join(problems) + ".")
@@ -115,8 +114,8 @@ def show(res, committed):
         st.subheader("What this attaches")
         st.dataframe(pd.DataFrame(
             res["preview"],
-            columns=["Matched by", "Parcel Number", "County", "Phone", "Type", "Status",
-                     "BuyBox address", "Owner"],
+            columns=["Matched by", "Parcel Number", "Phone", "Type", "Status",
+                     "Buybox address", "Owner"],
         ), use_container_width=True)
 
     if bad:
@@ -126,7 +125,7 @@ def show(res, committed):
                 st.write(f"- **{n:,}** — {reason}")
         rej = pd.DataFrame(
             res["rejects"],
-            columns=["Row", "Parcel Number", "Address", "City", "County", "Zip",
+            columns=["Row", "Parcel Number", "Address", "City", "Zip",
                      "Phone", "Phone Type", "Status", "Reason"],
         )
         st.dataframe(rej.head(200), use_container_width=True)
@@ -140,7 +139,7 @@ def go(commit):
         st.error("No database password — set it in the sidebar.")
         return
     try:
-        with st.spinner("Resolving against BuyBox…" if not commit else "Importing…"):
+        with st.spinner("Resolving against Buybox…" if not commit else "Importing…"):
             st.session_state["result"] = (
                 run(stage, conn_params=conn_params, updated_by=updated_by, commit=commit,
                     set_status=bool(mapping.get("status"))),

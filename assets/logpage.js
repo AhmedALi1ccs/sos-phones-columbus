@@ -1,20 +1,22 @@
 /**
- * The list page behind Cold calling: numbers gathered for calling, and where
- * each came from. Configured from calls.js, so another list of the same shape
- * would only need a second config.
+ * The list page behind Mailing and SMS. Both are logs loaded straight into
+ * Supabase -- who was contacted, how, and in which month -- so they share this
+ * and differ only by configuration: one category picker (campaign tag /
+ * approach), a month picker and free text.
  */
-import { db, configured, configBanner, esc, clean, cityLine, fmtPhone, digits, mountWho, propertyHref } from "./db.js";
+import { db, configured, configBanner, esc, mountWho, monthLabel } from "./db.js";
 import { mountSidebar } from "./nav.js";
 
 const PER_PAGE = 15;
 
-export function initContactList(cfg) {
+export function initLogPage(cfg) {
 
-const sourceEl = document.getElementById("source");
+const facetEl  = document.getElementById("facet");
+const periodEl = document.getElementById("period");
 const qEl      = document.getElementById("q");
 const clearBtn = document.getElementById("clearFilters");
-const countEl  = document.getElementById("callCount");
-const infoEl   = document.getElementById("callInfo");
+const countEl  = document.getElementById("logCount");
+const infoEl   = document.getElementById("logInfo");
 const summaryEl = document.getElementById("summary");
 const statusEl = document.getElementById("status");
 const rowsEl   = document.getElementById("rows");
@@ -25,41 +27,44 @@ mountWho(document.getElementById("whoHost"));
 
 let pageSeq = 0, countSeq = 0, page = 0, total = null;
 
-const filters = () => ({ q: qEl.value.trim() || null, p_source: sourceEl.value || null });
+const filters = () => ({
+  q: qEl.value.trim() || null,
+  [cfg.facetParam]: facetEl.value || null,
+  p_period: periodEl.value || null
+});
 const anyFilter = () => Object.values(filters()).some(Boolean);
 const totalPages = () => (total === null ? null : Math.max(1, Math.ceil(total / PER_PAGE)));
+const plural = (n) => (n === 1 ? cfg.noun : cfg.nouns);
 
 function setStatus(text) {
   statusEl.textContent = text || "";
   statusEl.hidden = !text;
 }
 
-async function loadSources() {
-  const { data, error } = await db.rpc(cfg.rpcSources);
-  if (error) { infoEl.textContent = error.message; return; }
-  if (!data.length) {
-    infoEl.textContent = cfg.emptyHint;
-    return;
+/* ------------------------------- facets ------------------------------- */
+async function loadFacets() {
+  const [f, per] = await Promise.all([db.rpc(cfg.rpcFacets), db.rpc(cfg.rpcPeriods)]);
+
+  if (!f.error) {
+    facetEl.insertAdjacentHTML("beforeend", f.data.map((r) =>
+      `<option value="${esc(cfg.facetValue(r))}">${esc(cfg.facetLabel(r))} (${Number(r.n).toLocaleString()})</option>`).join(""));
   }
-  sourceEl.insertAdjacentHTML("beforeend", data.map((r) =>
-    `<option value="${esc(r.source)}">${esc(r.source)} (${Number(r.n).toLocaleString()})</option>`).join(""));
-  infoEl.textContent = `${data.length} source${data.length === 1 ? "" : "s"}.`;
+  if (!per.error) {
+    // a row whose date could not be read has no period, and cannot be picked
+    const dated = per.data.filter((r) => r.period);
+    periodEl.insertAdjacentHTML("beforeend", dated.map((r) =>
+      `<option value="${esc(r.period)}">${esc(monthLabel(r.period))} (${Number(r.n).toLocaleString()})</option>`).join(""));
+    const undated = per.data.filter((r) => !r.period).reduce((n, r) => n + Number(r.n), 0);
+    const all = per.data.reduce((n, r) => n + Number(r.n), 0);
+    infoEl.textContent = all === 0 ? cfg.emptyList
+      : `${all.toLocaleString()} ${plural(all)} across ${dated.length} month${dated.length === 1 ? "" : "s"}` +
+        (undated ? `; ${undated.toLocaleString()} have a date that could not be read.` : ".");
+  }
+  const err = f.error || per.error;
+  if (err) infoEl.textContent = err.message;
 }
 
-function rowHtml(r) {
-  const href = clean(r.parcel) ? propertyHref(r.parcel) : null;
-  const addr = clean(r.address);
-  return `
-    <div class="mail-row calls">
-      <span class="addr">${href ? `<a href="${href}">${esc(addr)}</a>` : esc(addr)}</span>
-      <span class="who">${esc(clean(r.full_name))}</span>
-      <span class="meta">${esc(cityLine(r.property_city, r.property_state, r.property_zip))}</span>
-      <span class="tags">${r.source ? `<span class="chip vendor">${esc(r.source)}</span>` : ""}</span>
-      <span class="meta">${clean(r.parcel) ? esc(clean(r.parcel)) : "not in Buybox"}</span>
-      <a class="when" href="tel:${esc(digits(r.phone))}">${esc(fmtPhone(r.phone))}</a>
-    </div>`;
-}
-
+/* -------------------------------- rows -------------------------------- */
 async function load() {
   const mine = ++pageSeq;
   setStatus("Loading…");
@@ -70,19 +75,19 @@ async function load() {
 
   if (error) {
     setStatus("");
-    rowsEl.innerHTML = `<div class="mail-row calls"><span class="err">${esc(error.message)}</span></div>`;
+    rowsEl.innerHTML = `<div class="mail-row"><span class="err">${esc(error.message)}</span></div>`;
     pagerEl.innerHTML = "";
     return;
   }
   if (!data.length) {
-    setStatus(anyFilter() ? "No numbers match these filters." : cfg.emptyList);
+    setStatus(anyFilter() ? `No ${cfg.nouns} match these filters.` : cfg.emptyList);
     rowsEl.innerHTML = "";
     pagerEl.innerHTML = "";
     summaryEl.textContent = "";
     return;
   }
   setStatus("");
-  rowsEl.innerHTML = data.map(rowHtml).join("");
+  rowsEl.innerHTML = data.map(cfg.rowHtml).join("");
   renderSummary(data.length);
   renderPager();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -96,7 +101,7 @@ async function loadTotal() {
   const { data, error } = await db.rpc(cfg.rpcCount, filters());
   if (error || mine !== countSeq) return;
   total = Number(data);
-  countEl.textContent = anyFilter() ? `${total.toLocaleString()} number${total === 1 ? "" : "s"}` : "";
+  countEl.textContent = anyFilter() ? `${total.toLocaleString()} ${plural(total)}` : "";
   renderSummary();
   renderPager();
 }
@@ -109,7 +114,7 @@ function renderSummary(shown) {
   }
   const to = Math.min(total, from + PER_PAGE - 1);
   summaryEl.innerHTML = total === 0 ? ""
-    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b> numbers.`;
+    : `Showing <b>${from.toLocaleString()}–${to.toLocaleString()}</b> of <b>${total.toLocaleString()}</b> ${cfg.nouns}, newest first.`;
 }
 
 function pageWindow(current, last) {
@@ -138,13 +143,23 @@ function renderPager() {
     b.addEventListener("click", () => { page = Number(b.dataset.page); syncUrl(); load(); }));
 }
 
+/* ------------------------------ plumbing ------------------------------ */
 function syncUrl() {
   const url = new URL(location.href);
   const set = (k, v) => v ? url.searchParams.set(k, v) : url.searchParams.delete(k);
-  set("s", sourceEl.value);
+  set(cfg.facetUrlKey, facetEl.value);
+  set("mo", periodEl.value);
   set("q", qEl.value.trim());
   set("p", page > 0 ? page + 1 : "");
   history.replaceState(null, "", url);
+}
+
+function restoreFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (p.get(cfg.facetUrlKey)) facetEl.value = p.get(cfg.facetUrlKey);
+  if (p.get("mo")) periodEl.value = p.get("mo");
+  if (p.get("q")) qEl.value = p.get("q");
+  page = Math.max(0, (parseInt(p.get("p"), 10) || 1) - 1);
 }
 
 function onFilterChange() {
@@ -155,25 +170,23 @@ function onFilterChange() {
   load();
 }
 
-sourceEl.addEventListener("change", onFilterChange);
+[facetEl, periodEl].forEach((el) => el.addEventListener("change", onFilterChange));
 let debounce;
 qEl.addEventListener("input", () => { clearTimeout(debounce); debounce = setTimeout(onFilterChange, 280); });
-clearBtn.addEventListener("click", () => { sourceEl.value = ""; qEl.value = ""; onFilterChange(); });
+clearBtn.addEventListener("click", () => {
+  [facetEl, periodEl, qEl].forEach((el) => (el.value = ""));
+  onFilterChange();
+});
 
   if (!configured) {
     configBanner(document.getElementById("banner"));
-    [sourceEl, qEl].forEach((el) => (el.disabled = true));
+    [facetEl, periodEl, qEl].forEach((el) => (el.disabled = true));
     return;
   }
-  {
-    const p = new URLSearchParams(location.search);
-    loadSources().then(() => {
-      if (p.get("s")) sourceEl.value = p.get("s");
-      if (p.get("q")) qEl.value = p.get("q");
-      page = Math.max(0, (parseInt(p.get("p"), 10) || 1) - 1);
-      clearBtn.hidden = !anyFilter();
-      loadTotal();
-      load();
-    });
-  }
+  loadFacets().then(() => {
+    restoreFromUrl();
+    clearBtn.hidden = !anyFilter();
+    loadTotal();
+    load();
+  });
 }

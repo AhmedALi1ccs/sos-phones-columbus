@@ -21,24 +21,28 @@
   <main class="content">
     <div id="banner"></div>
     <h1 class="addr">SMS</h1>
-    <p class="sub">Numbers gathered for texting, and where each one came from.</p>
+    <p class="sub">Every record that has been texted, newest first.</p>
 
     <section class="card panel filters">
       <div class="filters-head">
         <h2>Filters</h2>
-        <span class="filters-count" id="callCount"></span>
+        <span class="filters-count" id="logCount"></span>
         <span class="spacer"></span>
         <button class="btn ghost" id="clearFilters" hidden>Clear</button>
       </div>
+
       <div class="filter-grid">
-        <label class="ffield">Source
-          <select id="source"><option value="">Any source</option></select>
+        <label class="ffield">Approach
+          <select id="facet"><option value="">Any approach</option></select>
+        </label>
+        <label class="ffield">Month
+          <select id="period"><option value="">Any month</option></select>
         </label>
         <label class="ffield grow">Search
-          <input type="search" id="q" autocomplete="off" placeholder="address, number, parcel number…">
+          <input type="search" id="q" autocomplete="off" placeholder="address, owner, parcel number…">
         </label>
       </div>
-      <p class="hint" id="callInfo" style="margin:10px 0 0"></p>
+      <p class="hint" id="logInfo" style="margin:10px 0 0"></p>
     </section>
 
     <div id="summary" class="summary"></div>

@@ -20,10 +20,10 @@ def sidebar_connection():
     with st.sidebar:
         st.subheader("Database")
         params = {
-            "host": st.text_input("Host", secret("PGHOST", "aws-1-us-east-2.pooler.supabase.com")),
+            "host": st.text_input("Host", secret("PGHOST", "aws-0-eu-west-3.pooler.supabase.com")),
             "port": int(st.text_input("Port", secret("PGPORT", "5432")) or 5432),
             "dbname": st.text_input("Database", secret("PGDATABASE", "postgres")),
-            "user": st.text_input("User", secret("PGUSER", "postgres.hoahkpeblfxjbkhwbdxs")),
+            "user": st.text_input("User", secret("PGUSER", "postgres.okojvwzrdtcvglaujxau")),
             "password": st.text_input("Password", secret("PGPASSWORD", ""), type="password"),
             "connect_timeout": 15,
         }
@@ -34,8 +34,8 @@ def sidebar_connection():
             try:
                 import psycopg2
                 with psycopg2.connect(**params) as c, c.cursor() as cur:
-                    cur.execute('select count(*) from public."BuyBox"')
-                    st.success(f"Connected — {cur.fetchone()[0]:,} BuyBox records")
+                    cur.execute('select count(*) from public."Buybox"')
+                    st.success(f"Connected — {cur.fetchone()[0]:,} Buybox records")
             except Exception as exc:                       # noqa: BLE001
                 st.error(f"{exc}")
     return params

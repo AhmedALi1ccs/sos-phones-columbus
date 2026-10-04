@@ -1,9 +1,11 @@
-Parcel Number,Address,City,Zip,County,Phone,Phone Type
-F# 1053610035,,,,,7065551000,Residential
-F# 1222009016,,,,,7065551001,Mobile
-F# 1222009014,,,,,7065551002,Residential
-,258 Switchgrass Run,Aiken,29803,,7065552000,Mobile
-,267 Switchgrass Run,Aiken,29803,,7065552001,Residential
-,107 Cottonwood Creek Ln,Aiken,29803,,7065552002,Mobile
-,PINE ST,,,,7065553001,Mobile
-F# NOPE123,,,,,7065553002,Mobile
+Parcel Number,Address,City,Zip,Phone,Phone Type
+010-000001-00,,,,6145551000,Residential
+01000000200,,,,6145551001,Mobile
+,1570 Franklin Avenue,,,6145551002,Mobile
+,4644 Summit Street,,,(614) 555-1003,Wireless
+010-000001-00,,,,614-555-1000,Mobile
+,603 olde towne ave,,,6145551004,
+,12 Nowhere Lane,,,6145551005,Mobile
+999-999999-99,,,,6145551006,Mobile
+,,,,6145551007,
+010-000001-00,,,,555,Mobile

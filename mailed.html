@@ -26,32 +26,23 @@
     <section class="card panel filters">
       <div class="filters-head">
         <h2>Filters</h2>
-        <span class="filters-count" id="mailCount"></span>
+        <span class="filters-count" id="logCount"></span>
         <span class="spacer"></span>
         <button class="btn ghost" id="clearFilters" hidden>Clear</button>
       </div>
 
       <div class="filter-grid">
-        <label class="ffield">Vendor
-          <select id="vendor"><option value="">Any vendor</option></select>
-        </label>
-        <label class="ffield">Mail distress
-          <select id="distress"><option value="">Any distress</option></select>
+        <label class="ffield">Campaign
+          <select id="facet"><option value="">Any campaign</option></select>
         </label>
         <label class="ffield">Month
           <select id="period"><option value="">Any month</option></select>
-        </label>
-        <label class="ffield">Mailed from
-          <input type="date" id="mailedFrom">
-        </label>
-        <label class="ffield">Mailed to
-          <input type="date" id="mailedTo">
         </label>
         <label class="ffield grow">Search
           <input type="search" id="q" autocomplete="off" placeholder="address, owner, parcel number…">
         </label>
       </div>
-      <p class="hint" id="mailInfo" style="margin:10px 0 0"></p>
+      <p class="hint" id="logInfo" style="margin:10px 0 0"></p>
     </section>
 
     <div id="summary" class="summary"></div>

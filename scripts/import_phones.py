@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import phone numbers into public.property_phones, linking them to BuyBox by parcel number.
+Import phone numbers into public.property_phones, linking them to Buybox by parcel number.
 
     python3 scripts/import_phones.py Book1.csv              # dry run, changes nothing
     python3 scripts/import_phones.py Book1.csv --apply      # actually write
@@ -10,9 +10,8 @@ Accepts either shape:
     long   Parcel Number, Phone, Phone Type[, Status][, Note]
     wide   Parcel Number, Phone 1, Phone 1 Type, Phone 2, Phone 2 Type, ...
 
-County is NOT supplied in the file: it is looked up from BuyBox, because parcel
-numbers repeat across counties.  Rows that cannot be resolved are written to a
-rejects CSV rather than guessed at.
+The parcel number may be written with or without its dashes.  Rows that cannot
+be matched to Buybox are written to a rejects CSV rather than guessed at.
 """
 
 import argparse, csv, io, os, re, sys
@@ -21,9 +20,9 @@ from collections import defaultdict
 import psycopg2
 
 DSN = dict(
-    host=os.environ.get("PGHOST", "aws-1-us-east-2.pooler.supabase.com"),
+    host=os.environ.get("PGHOST", "aws-0-eu-west-3.pooler.supabase.com"),
     port=int(os.environ.get("PGPORT", 5432)),
-    user=os.environ.get("PGUSER", "postgres.hoahkpeblfxjbkhwbdxs"),
+    user=os.environ.get("PGUSER", "postgres.okojvwzrdtcvglaujxau"),
     password=os.environ.get("PGPASSWORD", ""),
     dbname=os.environ.get("PGDATABASE", "postgres"),
 )
@@ -43,9 +42,9 @@ STATUS_MAP = {
 }
 
 
-def folio_key(f):
-    """Must match folio_norm() in sql/01_schema.sql."""
-    return re.sub(r"[^A-Za-z0-9]", "", re.sub(r"^\s*[Ff]\s*#\s*", "", f or "")).upper()
+def parcel_key(p):
+    """Must match parcel_norm() in sql/01_schema.sql."""
+    return re.sub(r"[^A-Za-z0-9]", "", p or "").upper()
 
 
 def phone_digits(p):
@@ -70,15 +69,15 @@ def pick(headers, *candidates):
 
 
 def read_rows(path):
-    """Yield (folio, phone, type, status, note, source_line) from long OR wide files."""
+    """Yield (parcel, phone, type, status, note, source_line) from long OR wide files."""
     with open(path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
         headers = reader.fieldnames or []
         if not headers:
             sys.exit("File has no header row.")
 
-        c_folio = pick(headers, "FOLIO", "Folio", "Parcel", "Parcel Number", "APN")
-        if not c_folio:
+        c_parcel = pick(headers, "Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")
+        if not c_parcel:
             sys.exit(f"No Parcel Number column found. Headers seen: {headers}")
 
         c_phone = pick(headers, "Phone", "Phone Number", "PhoneNumber", "Number")
@@ -99,22 +98,22 @@ def read_rows(path):
         c_note   = pick(headers, "Note", "Notes", "Comment")
 
         print(f"Format: {'wide (' + str(len(wide)) + ' phone columns)' if wide else 'long'}"
-              f" · folio={c_folio!r}"
+              f" · parcel={c_parcel!r}"
               f"{'' if wide else ' · phone=' + repr(c_phone)}"
               f"{' · type=' + repr(c_type) if c_type and not wide else ''}")
 
         for i, row in enumerate(reader, start=2):
-            folio = (row.get(c_folio) or "").strip()
+            parcel = (row.get(c_parcel) or "").strip()
             if wide:
                 for col, tcol, scol in wide:
                     val = (row.get(col) or "").strip()
                     if val:
-                        yield (folio, val,
+                        yield (parcel, val,
                                (row.get(tcol) or "").strip() if tcol else "",
                                (row.get(scol) or "").strip() if scol else "",
                                "", i)
             else:
-                yield (folio, (row.get(c_phone) or "").strip(),
+                yield (parcel, (row.get(c_phone) or "").strip(),
                        (row.get(c_type) or "").strip() if c_type else "",
                        (row.get(c_status) or "").strip() if c_status else "",
                        (row.get(c_note) or "").strip() if c_note else "",
@@ -141,20 +140,20 @@ def main():
     args = ap.parse_args()
 
     rejects_path = args.rejects or os.path.splitext(args.csv_path)[0] + "_rejects.csv"
-    rejects = []       # (folio, phone, type, status, reason)
+    rejects = []       # (parcel, phone, type, status, reason)
     unknown_types, unknown_statuses = defaultdict(int), defaultdict(int)
 
     # ---------- 1. read + normalise the file ----------
-    # keyed by (folio, number) so the same number listed twice in one file
+    # keyed by (parcel, number) so the same number listed twice in one file
     # collapses to a single row -- keeping whichever copy carries the most
     # information, not merely the first one seen.
     staged_by_key = {}
-    for folio, phone, ptype, status, note, line in read_rows(args.csv_path):
-        fk, d = folio_key(folio), phone_digits(phone)
+    for parcel, phone, ptype, status, note, line in read_rows(args.csv_path):
+        fk, d = parcel_key(parcel), phone_digits(phone)
         if not fk:
-            rejects.append((folio, phone, ptype, status, "no parcel number")); continue
+            rejects.append((parcel, phone, ptype, status, "no parcel number")); continue
         if len(d) != 10:
-            rejects.append((folio, phone, ptype, status,
+            rejects.append((parcel, phone, ptype, status,
                             "phone is not 10 digits" if d else "phone is empty")); continue
 
         t = TYPE_MAP.get(ptype.strip().lower()) if ptype else None
@@ -164,7 +163,7 @@ def main():
         if status and not s:
             unknown_statuses[status.strip()] += 1
 
-        row = (folio.strip(), fk, pretty_phone(d), d, t, s, note or None, line)
+        row = (parcel.strip(), fk, pretty_phone(d), d, t, s, note or None, line)
         prev = staged_by_key.get((fk, d))
         if prev is None or _info(row) > _info(prev):
             staged_by_key[(fk, d)] = prev and _merge(prev, row) or row
@@ -182,14 +181,14 @@ def main():
         write_rejects(rejects_path, rejects)
         return
 
-    # ---------- 2. resolve county + load ----------
+    # ---------- 2. match to Buybox + load ----------
     conn = psycopg2.connect(**DSN)
     conn.autocommit = False
     cur = conn.cursor()
 
     cur.execute("""
         create temp table stage (
-          folio text, folio_key text, phone text, phone_norm text,
+          parcel text, parcel_key text, phone text, phone_norm text,
           phone_type text, status text, note text, src_line int
         ) on commit drop""")
 
@@ -200,68 +199,41 @@ def main():
     buf.seek(0)
     cur.copy_expert("copy stage from stdin with (format csv, delimiter e'\\t', null '')", buf)
 
-    # every distinct county a parcel number appears in
+    # stored under Buybox's own spelling of the parcel, whatever the file wrote
     cur.execute("""
         create temp table resolved on commit drop as
-        select s.*,
-               b.county,
-               b.n_counties
+        select s.*, b."Parcel Number" as buybox_parcel
         from stage s
-        left join (
-          select public.folio_norm("FOLIO") as fk,
-                 min("Property county")     as county,
-                 count(distinct public.county_norm("Property county")) as n_counties
-          from public."BuyBox"
-          where public.folio_norm("FOLIO") is not null
-          group by 1
-        ) b on b.fk = s.folio_key""")
+        left join public."Buybox" b
+          on public.parcel_norm(b."Parcel Number") = s.parcel_key""")
 
-    cur.execute("select count(*) from resolved where county is null and n_counties is null")
-    no_match = cur.fetchone()[0]
-    cur.execute("select count(*) from resolved where n_counties > 1")
-    ambiguous = cur.fetchone()[0]
-
-    for reason, cond in (("Parcel Number not found in BuyBox", "n_counties is null"),
-                         ("parcel number used by properties in more than one county", "n_counties > 1")):
-        cur.execute(f"select folio, phone, coalesce(phone_type,''), coalesce(status,'') from resolved where {cond}")
-        rejects.extend([(a, b, c, d, reason) for a, b, c, d in cur.fetchall()])
+    cur.execute("select parcel, phone, coalesce(phone_type,''), coalesce(status,'') "
+                "from resolved where buybox_parcel is null")
+    missing = cur.fetchall()
+    no_match = len(missing)
+    rejects.extend([(a, b, c, d, "Parcel Number not found in Buybox") for a, b, c, d in missing])
 
     # ---------- 3. insert, respecting the 30-per-parcel cap ----------
-    cur.execute(f"""
-        create temp table to_insert on commit drop as
-        with ok as (
-          select * from resolved where n_counties = 1
-        ),
-        existing as (
-          select folio_key, county_key, count(*) n
-          from public.property_phones group by 1, 2
-        ),
-        ranked as (
-          select ok.*,
-                 coalesce(e.n, 0) as already,
-                 row_number() over (partition by ok.folio_key order by ok.src_line) as rn
-          from ok
-          left join existing e
-            on e.folio_key = ok.folio_key
-           and e.county_key = lower(btrim(coalesce(ok.county, '')))
-        )
-        select * from ranked where already + rn <= {MAX_PHONES}""")
-    cur.execute("select count(*) from to_insert")
+    cur.execute("""
+        create temp table ranked on commit drop as
+        select ok.*,
+               coalesce(e.n, 0) as already,
+               row_number() over (partition by ok.parcel_key order by ok.src_line) as rn
+        from (select * from resolved where buybox_parcel is not null) ok
+        left join (
+          select parcel_key, count(*) n from public.property_phones group by 1
+        ) e on e.parcel_key = ok.parcel_key""")
+    cur.execute(f"select count(*) from ranked where already + rn <= {MAX_PHONES}")
     will_insert = cur.fetchone()[0]
-    cur.execute(f"""select count(*) from (
-        select ok.*, coalesce(e.n,0) already,
-               row_number() over (partition by ok.folio_key order by ok.src_line) rn
-        from (select * from resolved where n_counties = 1) ok
-        left join (select folio_key, county_key, count(*) n from public.property_phones group by 1,2) e
-          on e.folio_key = ok.folio_key and e.county_key = lower(btrim(coalesce(ok.county,'')))) x
-        where already + rn > {MAX_PHONES}""")
+    cur.execute(f"select count(*) from ranked where already + rn > {MAX_PHONES}")
     over_cap = cur.fetchone()[0]
 
-    cur.execute("""
-        insert into public.property_phones (folio, county, phone, phone_type, status, note, slot, updated_by)
-        select folio, county, phone, phone_type, status, note, already + rn, 'import'
-        from to_insert
-        on conflict (folio_key, county_key, phone_norm) do nothing""")
+    cur.execute(f"""
+        insert into public.property_phones (parcel, phone, phone_type, status, note, slot, updated_by)
+        select buybox_parcel, phone, phone_type, status, note, already + rn, 'import'
+        from ranked
+        where already + rn <= {MAX_PHONES}
+        on conflict (parcel_key, phone_norm) do nothing""")
     inserted = cur.rowcount
     skipped_existing = will_insert - inserted
 
@@ -270,9 +242,8 @@ def main():
         cur.execute("""
             update public.property_phones p
                set phone_type = t.phone_type
-              from to_insert t
-             where p.folio_key  = t.folio_key
-               and p.county_key = lower(btrim(coalesce(t.county,'')))
+              from ranked t
+             where p.parcel_key = t.parcel_key
                and p.phone_norm = t.phone_norm
                and p.phone_type is null
                and t.phone_type is not null""")
@@ -280,8 +251,7 @@ def main():
 
     print(f"""
   matched to a parcel ....... {will_insert + over_cap}
-  Parcel Number not in BuyBox  {no_match}
-  ambiguous parcel number ... {ambiguous}
+  Parcel Number not in Buybox  {no_match}
   over the {MAX_PHONES}-number cap ..... {over_cap}
   already in the table ...... {skipped_existing}
   INSERTED .................. {inserted}{f'''

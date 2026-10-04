@@ -1,14 +1,14 @@
 """
-Loading contact lists: cold calling, SMS, or anything else of the same shape.
+Loading contact lists: cold calling, or anything else of the same shape.
 
 A row is an address, a number and where the number came from. The address is
-resolved to a parcel when BuyBox knows it, which is what lets a row link to the
-property page -- but an address BuyBox does not know is still loaded, without a
+resolved to a parcel when Buybox knows it, which is what lets a row link to the
+property page -- but an address Buybox does not know is still loaded, without a
 parcel, because the list is worth having either way. That is the one place this
 differs from the phone uploader, which rejects what it cannot place.
 
-The table is a parameter so the channels cannot drift apart: ColdCalling and SMS
-have the same columns and the same rules, and fixing one fixes both.
+The table is a parameter so a second list of the same shape needs only a new
+entry in TABLES, not a second copy of these rules.
 
 Kept free of Streamlit so it can be exercised without a browser.
 """
@@ -44,23 +44,18 @@ CLASSIFY_SQL = """
 create temp table resolved on commit drop as
 select s.row_no, s.address, s.phone, s.source,
        regexp_replace(coalesce(s.phone,''), '\\D', '', 'g')     as digits,
-       b.folio, b.county, coalesce(b.parcels, 0)                as parcels
+       b.parcel, coalesce(b.parcels, 0)                         as parcels
 from stage s
 left join lateral (
-  select min(bb."FOLIO")           as folio,
-         min(bb."Property county") as county,
-         count(distinct (public.folio_norm(bb."FOLIO"),
-                         public.county_norm(bb."Property county"))) as parcels
-  from public."BuyBox" bb
+  select min(bb."Parcel Number") as parcel, count(*) as parcels
+  from public."Buybox" bb
   where public.addr_norm(bb."Property address") = public.addr_norm(s.address)
-    and coalesce(btrim(bb."FOLIO"), '') <> ''
 ) b on true;
 
 create temp table classified on commit drop as
 select r.*,
        -- only an unambiguous address earns a parcel link; the row loads either way
-       case when r.parcels = 1 then r.folio  end as link_folio,
-       case when r.parcels = 1 then r.county end as link_county,
+       case when r.parcels = 1 then r.parcel end as link_parcel,
        case
          when btrim(coalesce(r.address,'')) = ''   then 'no address in the row'
          when not (length(r.digits) = 10
@@ -78,8 +73,7 @@ select distinct on (upper(public.fold_street_words(address)),
            || substr(right(digits, 10), 4, 3) || '-'
            || substr(right(digits, 10), 7, 4)           as phone,
        nullif(btrim(coalesce(source, '')), '')          as source,
-       link_folio                                       as folio,
-       link_county                                      as county,
+       link_parcel                                      as parcel,
        row_no
 from classified
 where reject_reason is null
@@ -87,16 +81,16 @@ order by upper(public.fold_street_words(address)), right(digits, 10),
          coalesce(btrim(source), ''), row_no;
 """
 
-# the only table-specific statement; the conflict target is the same index
-# expression on both, so nothing else has to change per channel
+# the only table-specific statement; any table in TABLES has the same
+# conflict target, so nothing else has to change per list
 INSERT_SQL = """
-insert into public.{table} (address, phone, source, folio, county, uploaded_src)
-select address, phone, source, folio, county, %s
+insert into public.{table} (address, phone, source, parcel, uploaded_src)
+select address, phone, source, parcel, %s
 from to_load
 on conflict (addr_key, phone_norm, coalesce(source, '')) do nothing;
 """
 
-TABLES = {"ColdCalling", "SMS"}
+TABLES = {"ColdCalling"}
 
 
 def run(stage, *, conn_params, table="ColdCalling", source_label="upload", commit=False):
@@ -119,7 +113,7 @@ def run(stage, *, conn_params, table="ColdCalling", source_label="upload", commi
 
             cur.execute("select count(*) from to_load")
             loadable = cur.fetchone()[0]
-            cur.execute("select count(*) from to_load where folio is not null")
+            cur.execute("select count(*) from to_load where parcel is not null")
             linked = cur.fetchone()[0]
 
             cur.execute("""
@@ -132,12 +126,9 @@ def run(stage, *, conn_params, table="ColdCalling", source_label="upload", commi
 
             cur.execute("""
                 select t.address, t.phone, t.source,
-                       coalesce(t.folio, '—'), coalesce(b."Full Name", '')
+                       coalesce(t.parcel, '—'), coalesce(b."Full Name", '')
                 from to_load t
-                left join lateral (
-                  select bb."Full Name" from public."BuyBox" bb
-                  where public.folio_norm(bb."FOLIO") = public.folio_norm(t.folio) limit 1
-                ) b on true
+                left join public."Buybox" b on b."Parcel Number" = t.parcel
                 order by t.row_no limit 25""")
             preview = cur.fetchall()
 

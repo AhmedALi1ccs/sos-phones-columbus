@@ -2,55 +2,46 @@
 -- Safe to re-run.  Run with:  psql -f sql/01_schema.sql
 begin;
 
-create extension if not exists pg_trgm;
+create extension if not exists pg_trgm with schema extensions;
 
 -- ---------------------------------------------------------------
--- 1. Search + lookup support on the existing BuyBox table.
+-- 1. Search + lookup support on the existing Buybox table.
 --    Expression indexes only: the table itself is NOT altered, so bulk
---    COPY / INSERT loads into BuyBox keep working unchanged.
+--    COPY / INSERT loads into Buybox keep working unchanged.
 -- ---------------------------------------------------------------
-create index if not exists buybox_search_trgm on public."BuyBox" using gin (
+create index if not exists buybox_search_trgm on public."Buybox" using gin (
   lower(
     coalesce("Full Name",'')||' '||coalesce("First Name",'')||' '||coalesce("Last Name",'')||' '||
     coalesce("Property address",'')||' '||coalesce("Property city",'')||' '||coalesce("Property state",'')||' '||coalesce("Property zip",'')||' '||
     coalesce("Mailing address",'')||' '||coalesce("Mailing city",'')||' '||coalesce("Mailing state",'')||' '||coalesce("Mailing zip",'')
-  ) gin_trgm_ops
+  ) extensions.gin_trgm_ops
 );
 
--- how a FOLIO is compared: case-folded, with the cosmetic "F# " prefix and all
--- punctuation stripped,
--- so 'F# 0442207000', 'f#0442207000' and '0442207000' are the same parcel.
-create or replace function public.folio_norm(f text) returns text
+-- how a parcel number is compared: case-folded, with all punctuation stripped,
+-- so '010-000001-00', '01000000100' and '010 000001 00' are the same parcel.
+create or replace function public.parcel_norm(p text) returns text
   language sql immutable parallel safe as
-$$ select nullif(upper(regexp_replace(regexp_replace(coalesce(f,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g')), '') $$;
+$$ select nullif(upper(regexp_replace(coalesce(p,''), '[^A-Za-z0-9]', '', 'g')), '') $$;
 
-create or replace function public.county_norm(c text) returns text
-  language sql immutable parallel safe as
-$$ select coalesce(lower(btrim(coalesce(c,''))), '') $$;
-
--- the real business key of a property: parcel number + county
-create index if not exists buybox_folio_county_idx
-  on public."BuyBox" (public.folio_norm("FOLIO"), public.county_norm("Property county"));
-create index if not exists buybox_folio_idx on public."BuyBox" (public.folio_norm("FOLIO"));
--- lets "search by FOLIO" match a fragment, not just a prefix
-create index if not exists buybox_folio_trgm on public."BuyBox"
-  using gin (public.folio_norm("FOLIO") gin_trgm_ops);
-create index if not exists mailed_folio_idx on public."Mailed" (public.folio_norm("FOLIO"));
+create index if not exists buybox_parcel_idx on public."Buybox" (public.parcel_norm("Parcel Number"));
+-- lets "search by Parcel Number" match a fragment, not just a prefix
+create index if not exists buybox_parcel_trgm on public."Buybox"
+  using gin (public.parcel_norm("Parcel Number") extensions.gin_trgm_ops);
+create index if not exists mail_parcel_idx on public."Mail" (public.parcel_norm("Parcel Number"));
+create index if not exists sms_parcel_idx  on public."SMS"  (public.parcel_norm("parcel number"));
 
 -- ---------------------------------------------------------------
--- 2. Phone numbers : one row per phone, keyed to the property by
---    FOLIO + county rather than BuyBox.id, so the link survives a
---    full reload of BuyBox (ids get reassigned, parcel numbers do not).
+-- 2. Phone numbers : one row per phone, keyed to the property by its
+--    normalised parcel number.  Not a foreign key on purpose: a record
+--    removed from Buybox (or reloaded) keeps its numbers.
 -- ---------------------------------------------------------------
 create table if not exists public.property_phones (
   id          bigint generated always as identity primary key,
-  folio       text not null,                  -- as stored in BuyBox, e.g. 'F# 0442207000'
-  county      text,                           -- parcel numbers repeat across counties
-  folio_key   text generated always as (upper(regexp_replace(regexp_replace(coalesce(folio,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g'))) stored,
-  county_key  text generated always as (lower(btrim(coalesce(county, ''))))                                   stored,
+  parcel      text not null,                  -- as stored in Buybox, e.g. '010-000001-00'
+  parcel_key  text generated always as (upper(regexp_replace(coalesce(parcel,''), '[^A-Za-z0-9]', '', 'g'))) stored,
   phone       text not null,
-  -- digits only, with a leading country code dropped, so that 706-555-1234,
-  -- (706) 555-1234 and 1-706-555-1234 are one number and the unique index
+  -- digits only, with a leading country code dropped, so that 614-555-1234,
+  -- (614) 555-1234 and 1-614-555-1234 are one number and the unique index
   -- below actually catches the duplicate
   phone_norm  text generated always as (
                 case when length(regexp_replace(coalesce(phone,''), '\D', '', 'g')) = 11
@@ -65,14 +56,14 @@ create table if not exists public.property_phones (
   updated_by  text,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
-  constraint property_phones_folio_not_blank check (btrim(folio) <> '')
+  constraint property_phones_parcel_not_blank check (btrim(parcel) <> '')
 );
 
 -- the same number cannot be listed twice on one parcel
 create unique index if not exists property_phones_uniq
-  on public.property_phones (folio_key, county_key, phone_norm);
+  on public.property_phones (parcel_key, phone_norm);
 create index if not exists property_phones_prop_idx
-  on public.property_phones (folio_key, county_key, slot, id);
+  on public.property_phones (parcel_key, slot, id);
 create index if not exists property_phones_norm_idx on public.property_phones (phone_norm);
 
 -- keep updated_at honest
@@ -91,10 +82,9 @@ create or replace function public.tg_phone_cap() returns trigger language plpgsq
 declare n int;
 begin
   select count(*) into n from public.property_phones p
-   where p.folio_key  = upper(regexp_replace(regexp_replace(coalesce(new.folio,''), '^\s*[Ff]\s*#\s*', ''), '[^A-Za-z0-9]', '', 'g'))
-     and p.county_key = lower(btrim(coalesce(new.county, '')));
+   where p.parcel_key = upper(regexp_replace(coalesce(new.parcel,''), '[^A-Za-z0-9]', '', 'g'));
   if n >= 30 then
-    raise exception 'parcel % (% county) already has 30 phone numbers', new.folio, new.county
+    raise exception 'parcel % already has 30 phone numbers', new.parcel
       using errcode = 'check_violation';
   end if;
   return new;
@@ -106,7 +96,7 @@ create trigger property_phones_cap before insert on public.property_phones
 
 -- ---------------------------------------------------------------
 -- 3. Distress reasons.  "Lists" is a comma separated string whose values
---    arrive in several spellings (HIGH EQUITY / High equity / High Equity,
+--    may arrive in several spellings (HIGH EQUITY / High equity,
 --    Tax Delinquent / Tax Del).  These fold them to one key per reason.
 -- ---------------------------------------------------------------
 create or replace function public.distress_norm(v text) returns text
@@ -117,16 +107,39 @@ $$ select case btrim(lower(regexp_replace(coalesce(v,''), '[^A-Za-z0-9]+', ' ', 
             else btrim(lower(regexp_replace(coalesce(v,''), '[^A-Za-z0-9]+', ' ', 'g')))
           end $$;
 
+-- The distinct reasons on a record, in the order they first appear.
+-- PL/pgSQL rather than SQL on purpose: a SQL function with an aggregate cannot
+-- be inlined, so Postgres re-plans it on every call (~29us a row), and this
+-- runs once per row whenever a distress filter is rechecked or a filtered set
+-- is sorted by stack. This version is ~4us. It folds each value exactly as
+-- distress_norm() does -- keep the two in step.
 create or replace function public.distress_keys(lists text) returns text[]
-  language sql immutable parallel safe as
-$$ select coalesce(array_agg(distinct k), '{}'::text[])
-   from (select public.distress_norm(v) as k
-         from unnest(string_to_array(coalesce(lists,''), ',')) v) t
-   where k is not null $$;
+  language plpgsql immutable parallel safe as
+$$
+declare
+  v   text;
+  k   text;
+  acc text[] := '{}';
+begin
+  if lists is null or lists = '' then
+    return acc;
+  end if;
+  foreach v in array string_to_array(lists, ',') loop
+    k := btrim(lower(regexp_replace(v, '[^A-Za-z0-9]+', ' ', 'g')));
+    if k = 'tax del' then
+      k := 'tax delinquent';
+    end if;
+    if k <> '' and not (k = any(acc)) then
+      acc := acc || k;
+    end if;
+  end loop;
+  return acc;
+end
+$$;
 
 -- containment index, so "show me every PROBATE + HIGH EQUITY record" is indexed
 create index if not exists buybox_lists_gin
-  on public."BuyBox" using gin (public.distress_keys("Lists"));
+  on public."Buybox" using gin (public.distress_keys("Lists"));
 
 -- how many distinct distress reasons a record carries ("list stack").
 -- Built on distress_keys so HIGH EQUITY + High equity counts once.
@@ -134,12 +147,11 @@ create or replace function public.list_stack(lists text) returns int
   language sql immutable parallel safe as
 $$ select coalesce(cardinality(public.distress_keys(lists)), 0) $$;
 
--- Serves "everything, heaviest stack first" without sorting 286k rows.
+-- Serves "everything, heaviest stack first" without sorting 418k rows.
 -- INCLUDE ("Lists") is what makes it an INDEX ONLY scan: without the underlying
--- column in the index, deep pages fall back to a heap fetch per row and paging
--- to offset 150k costs ~7.5s instead of ~0.8s.
+-- column in the index, deep pages fall back to a heap fetch per skipped row.
 create index if not exists buybox_stack_idx
-  on public."BuyBox" (public.list_stack("Lists") desc, id) include ("Lists");
+  on public."Buybox" (public.list_stack("Lists") desc, "Parcel Number") include ("Lists");
 
 -- ---------------------------------------------------------------
 -- 4. Street-word folding, shared by address matching and by the search box.
@@ -151,7 +163,7 @@ language sql immutable parallel safe as
 $fn$
   -- One regexp pass, then a lookup per word. Doing it as ~90 sequential
   -- regexp_replace calls instead is slow enough that building the index on
-  -- 286k rows exceeds the statement timeout.
+  -- 418k rows exceeds the statement timeout.
   with cleaned as (
     select btrim(regexp_replace(lower(coalesce(a, '')), '[^a-z0-9]+', ' ', 'g')) as s
   ),
@@ -261,13 +273,39 @@ $fn$
   ) as m(word, abbr) on m.word = words.w
 $fn$;
 
--- Address matching, for imports that carry an address instead of a FOLIO.
--- "2451 Juniper Drive" and "2451 JUNIPER DR" both become "2451 JUNIPER DR".
+-- Address matching, for imports that carry an address instead of a parcel.
+-- "1570 Franklin Avenue" and "1570 FRANKLIN AVE" both become "1570 FRANKLIN AVE".
 create or replace function public.addr_norm(a text) returns text
 language sql immutable parallel safe as
 $$ select upper(public.fold_street_words(a)) $$;
 
 create index if not exists buybox_addr_norm_idx
-  on public."BuyBox" (public.addr_norm("Property address"));
+  on public."Buybox" (public.addr_norm("Property address"));
+
+-- ---------------------------------------------------------------
+-- 5. The search box.  This data abbreviates street suffixes (st, ave, dr)
+--    but spells out the words in street names (Summit, Creek, Ridge), so a
+--    typed word matches either as typed or as its abbreviation: "avenue"
+--    finds "ave", and "summit" still finds "summit st".
+-- ---------------------------------------------------------------
+create or replace function public.search_words(q text) returns text[]
+language sql immutable parallel safe as
+$$ select coalesce(regexp_split_to_array(
+            nullif(btrim(regexp_replace(lower(coalesce(q, '')), '[^a-z0-9]+', ' ', 'g')), ''), ' '),
+          '{}'::text[]) $$;
+
+-- the SQL fragment "expr contains this word, or its abbreviation"
+create or replace function public.word_like(expr text, word text) returns text
+language plpgsql immutable parallel safe as
+$fn$
+declare
+  abbr text := public.fold_street_words(word);
+begin
+  if abbr is null or abbr = word then
+    return format('%s like %L', expr, '%' || word || '%');
+  end if;
+  return format('(%s like %L or %s like %L)', expr, '%' || word || '%', expr, '%' || abbr || '%');
+end
+$fn$;
 
 commit;

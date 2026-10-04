@@ -1,6 +1,6 @@
 import {
   db, configured, configBanner, esc, clean, digits, fmtPhone, cityLine, splitList,
-  chipsHtml, fmtSaleDate, relTime, folioKey, countyKey, getWho, mountWho, toast,
+  chipsHtml, fmtSaleDate, fmtMoney, monthLabel, relTime, parcelKey, getWho, mountWho, toast,
   STATUS, NO_STATUS, PHONE_TYPE
 } from "./db.js";
 
@@ -14,10 +14,7 @@ mountWho(document.getElementById("whoHost"));
 document.getElementById("back").href =
   document.referrer.includes("index.html") ? document.referrer : "index.html";
 
-const params = new URLSearchParams(location.search);
-const qFolio  = params.get("folio");
-const qCounty = params.get("county");
-const qId     = params.get("id");
+const qParcel = new URLSearchParams(location.search).get("parcel");
 
 let property = null;   // normalised, snake_case
 let phones   = [];
@@ -25,7 +22,7 @@ let phones   = [];
 if (!configured) {
   configBanner(document.getElementById("banner"));
   titleEl.textContent = "Not connected";
-} else if (!qFolio && !qId) {
+} else if (!qParcel) {
   titleEl.textContent = "No property selected";
   bodyEl.innerHTML = `<p class="hint"><a href="index.html">Go back to search</a></p>`;
 } else {
@@ -33,38 +30,15 @@ if (!configured) {
 }
 
 async function load() {
-  const res = qFolio ? await loadByFolio() : await loadById();
-  if (!res) return;
+  const { data, error } = await db.rpc("get_property", { p_parcel: qParcel });
+  if (error) { fail(error.message); return; }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) { notFound(); return; }
 
-  property = res;
+  property = row;
   renderHead();
   renderBody();
-  if (property.folio) { loadPhones(); loadMailed(); loadColdCalls(); loadSms(); }
-}
-
-async function loadByFolio() {
-  const { data, error } = await db.rpc("get_property", { p_folio: qFolio, p_county: qCounty });
-  if (error) { fail(error.message); return null; }
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) { notFound(); return null; }
-  return row;
-}
-
-/** Fallback for the ~712 BuyBox rows that carry no FOLIO. */
-async function loadById() {
-  const { data, error } = await db.from("BuyBox").select("*").eq("id", qId).maybeSingle();
-  if (error) { fail(error.message); return null; }
-  if (!data) { notFound(); return null; }
-  return {
-    id: data.id, folio: clean(data.FOLIO), county: clean(data["Property county"]),
-    full_name: data["Full Name"], first_name: data["First Name"], last_name: data["Last Name"],
-    property_address: data["Property address"], property_city: data["Property city"],
-    property_state: data["Property state"], property_zip: data["Property zip"],
-    mailing_address: data["Mailing address"], mailing_city: data["Mailing city"],
-    mailing_state: data["Mailing state"], mailing_zip: data["Mailing zip"],
-    sale_date: data["Sale Date"], sale_price: data["Sale Price"],
-    lists: data.Lists, tag: data.Tag, match_count: 1
-  };
+  loadPhones(); loadMailed(); loadSms(); loadColdCalls();
 }
 
 function fail(msg) {
@@ -73,15 +47,15 @@ function fail(msg) {
 }
 function notFound() {
   titleEl.textContent = "Property not found";
-  bodyEl.innerHTML = `<p class="hint">That parcel is not in BuyBox. <a href="index.html">Back to search</a></p>`;
+  bodyEl.innerHTML = `<p class="hint">That parcel is not in Buybox — it may have been removed.
+    <a href="index.html">Back to search</a></p>`;
 }
 
 function renderHead() {
   const p = property;
   titleEl.textContent = clean(p.property_address) || "(no property address)";
   const bits = [cityLine(p.property_city, p.property_state, p.property_zip)];
-  if (clean(p.county)) bits.push(clean(p.county) + " County");
-  if (clean(p.folio)) bits.push(clean(p.folio));
+  if (clean(p.parcel)) bits.push(clean(p.parcel));
   subEl.textContent = bits.filter(Boolean).join("  ·  ");
   document.title = `${titleEl.textContent} — SOS Phones`;
 }
@@ -96,28 +70,19 @@ function kv(pairs) {
 function renderBody() {
   const p = property;
   const lists = splitList(p.lists);
-  const tags  = splitList(p.tag);
-  const price = clean(p.sale_price);
+  const tags  = splitList(p.tags);
 
   bodyEl.innerHTML = `
-    ${Number(p.match_count) > 1 ? `<div class="err">
-       <strong>Ambiguous parcel number.</strong> ${esc(clean(p.folio))} is used by
-       ${esc(String(p.match_count))} different properties (parcel numbers repeat across counties).
-       Showing the first — open it from search to land on the right one.</div>` : ""}
-    ${!clean(p.folio) ? `<div class="err">
-       <strong>This record has no Parcel Number.</strong> Phone numbers are filed by parcel,
-       so none can be attached to this row until it gets one.</div>` : ""}
-
     <div class="grid">
       <section class="card panel">
         <h2>Owner</h2>
-        ${kv([["Full name", p.full_name], ["First", p.first_name], ["Last", p.last_name], ["Parcel number", p.folio]])}
+        ${kv([["Full name", p.full_name], ["First", p.first_name], ["Last", p.last_name], ["Parcel number", p.parcel]])}
       </section>
 
       <section class="card panel">
         <h2>Property address</h2>
         ${kv([["Address", p.property_address], ["City", p.property_city],
-              ["State", p.property_state], ["Zip", p.property_zip], ["County", p.county]])}
+              ["State", p.property_state], ["Zip", p.property_zip]])}
       </section>
 
       <section class="card panel">
@@ -128,20 +93,12 @@ function renderBody() {
 
       <section class="card panel">
         <h2>Record</h2>
-        ${kv([["Sale date", fmtSaleDate(p.sale_date)],
-              ["Sale price", price && price !== "0" && !isNaN(Number(price)) ? "$" + Number(price).toLocaleString() : ""]])}
-        <div style="margin-top:12px" id="mailedBox">
-          ${clean(p.folio) ? `<span class="badge no">Checking mail history…</span>`
-                           : `<span class="badge no">✉️ No mail history</span>`}
-        </div>
-        <div style="margin-top:10px" id="coldBox">
-          ${clean(p.folio) ? `<span class="badge no">Checking cold calling…</span>`
-                           : `<span class="badge no">📞 No cold calling</span>`}
-        </div>
-        <div style="margin-top:10px" id="smsBox">
-          ${clean(p.folio) ? `<span class="badge no">Checking SMS…</span>`
-                           : `<span class="badge no">💬 No SMS</span>`}
-        </div>
+        ${kv([["Appraised value", fmtMoney(p.appraised_value)],
+              ["Sale date", fmtSaleDate(p.sale_date)],
+              ["Sale price", fmtMoney(p.sale_price)]])}
+        <div style="margin-top:12px" id="mailedBox"><span class="badge no">Checking mail history…</span></div>
+        <div style="margin-top:10px" id="smsBox"><span class="badge no">Checking SMS…</span></div>
+        <div style="margin-top:10px" id="coldBox"><span class="badge no">Checking cold calling…</span></div>
       </section>
     </div>
 
@@ -158,8 +115,7 @@ function renderBody() {
     <section class="section">
       <h2>Phone numbers <span id="phoneCount" class="hint"></span></h2>
       <div class="card phones" id="phones">
-        ${clean(p.folio) ? `<div class="phone-row"><span class="skeleton" style="width:200px"></span></div>`
-                         : `<div class="phone-row"><span class="hint">Unavailable — this record has no parcel number.</span></div>`}
+        <div class="phone-row"><span class="skeleton" style="width:200px"></span></div>
       </div>
     </section>
 
@@ -171,63 +127,53 @@ function renderBody() {
     </p>`;
 }
 
-/* ------------------------------- mailed ------------------------------- */
-const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/* --------------------------- mail and SMS --------------------------- */
+/**
+ * Both are logs loaded into Supabase as they happen: one chip per mailing or
+ * text, saying what it was and when.
+ */
+async function loadHistory({ rpc, boxId, icon, had, none, chip }) {
+  const box = document.getElementById(boxId);
+  const { data, error } = await db.rpc(rpc, { p_parcel: property.parcel });
 
-/** 29 -> "29th", 1 -> "1st", 22 -> "22nd". */
-function ordinal(d) {
-  if (d % 100 >= 11 && d % 100 <= 13) return `${d}th`;
-  return `${d}${["th", "st", "nd", "rd"][d % 10] || "th"}`;
-}
+  if (error)               { box.innerHTML = `<span class="badge no">${icon} history unavailable</span>`; return; }
+  if (!data || !data.length) { box.innerHTML = `<span class="badge no">${icon} ${esc(none)}</span>`; return; }
 
-/** "29th Sep 2026" from the row's date. */
-function mailPeriod(d) {
-  if (!d) return "";
-  const [y, m, day] = String(d).split("-").map(Number);
-  return `${ordinal(day)} ${MONTHS[m]} ${y}`;
-}
-
-async function loadMailed() {
-  const box = document.getElementById("mailedBox");
-  const { data, error } = await db.rpc("get_mail_history", { p_folio: property.folio });
-
-  if (error)               { box.innerHTML = `<span class="badge no">Mail history unavailable</span>`; return; }
-  if (!data || !data.length) { box.innerHTML = `<span class="badge no">✉️ Not mailed</span>`; return; }
-
-  // one chip per mailing: who sent it, what list, and when
-  const kinds = [...new Set(data.map((r) => [
-    clean(r.vendor), clean(r.distress), mailPeriod(r.mailed_on)
-  ].filter(Boolean).join(" · ")).filter(Boolean))];
-
+  const kinds = [...new Set(data.map(chip).filter(Boolean))];
   box.innerHTML =
-    `<span class="badge yes">✉️ Mailed ×${data.length}</span>` +
+    `<span class="badge yes">${icon} ${esc(had)} ×${data.length}</span>` +
     (kinds.length ? `<div class="chips" style="margin-top:8px">${chipsHtml(kinds)}</div>` : "");
 }
 
-/* ------------------------ cold calling and SMS ------------------------ */
-/**
- * Both lists hold the same columns and read the same way on the page, so one
- * function serves them and they cannot drift apart.
- */
-async function loadContactList({ table, boxId, icon, had, none }) {
-  const box = document.getElementById(boxId);
-  // filtered on the county too: 139 parcel numbers are shared across counties,
-  // and a list loaded against one of them is not about the other
+const loadMailed = () => loadHistory({
+  rpc: "get_mail_history", boxId: "mailedBox", icon: "✉️", had: "Mailed", none: "Not mailed",
+  chip: (r) => [clean(r.tag), r.period ? monthLabel(r.period, true) : clean(r.mail_date),
+                fmtMoney(r.check_value)].filter(Boolean).join(" · ")
+});
+
+const loadSms = () => loadHistory({
+  rpc: "get_sms_history", boxId: "smsBox", icon: "💬", had: "Texted", none: "Not texted",
+  chip: (r) => [clean(r.approach), r.period ? monthLabel(r.period, true)
+                                            : [clean(r.month), clean(r.year)].join(" ").trim()]
+                 .filter(Boolean).join(" · ")
+});
+
+/* ---------------------------- cold calling ---------------------------- */
+async function loadColdCalls() {
+  const box = document.getElementById("coldBox");
   const { data, error } = await db
-    .from(table)
+    .from("ColdCalling")
     .select("phone, source")
-    .eq("folio_key", folioKey(property.folio))
-    .eq("county_key", countyKey(property.county))
+    .eq("parcel_key", parcelKey(property.parcel))
     .order("source", { ascending: true, nullsFirst: false })
     .order("id", { ascending: true });
 
-  if (error)        { box.innerHTML = `<span class="badge no">${esc(table)} unavailable</span>`; return; }
-  if (!data.length) { box.innerHTML = `<span class="badge no">${icon} ${esc(none)}</span>`; return; }
+  if (error)        { box.innerHTML = `<span class="badge no">📞 Cold calling unavailable</span>`; return; }
+  if (!data.length) { box.innerHTML = `<span class="badge no">📞 Not cold called</span>`; return; }
 
   const shown = data.slice(0, 8);
   box.innerHTML =
-    `<span class="badge yes">${icon} ${esc(had)} ×${data.length}</span>` +
+    `<span class="badge yes">📞 Cold called ×${data.length}</span>` +
     `<div class="chips" style="margin-top:8px">` +
     shown.map((c) => `
       <a class="chip tel" href="tel:${esc(digits(c.phone))}"
@@ -237,20 +183,9 @@ async function loadContactList({ table, boxId, icon, had, none }) {
     `</div>`;
 }
 
-const loadColdCalls = () => loadContactList({
-  table: "ColdCalling", boxId: "coldBox", icon: "📞",
-  had: "Cold called", none: "Not cold called"
-});
-const loadSms = () => loadContactList({
-  table: "SMS", boxId: "smsBox", icon: "💬",
-  had: "Texted", none: "Not texted"
-});
-
 /* ------------------------------- phones ------------------------------- */
 function phoneFilter(query) {
-  return query
-    .eq("folio_key",  folioKey(property.folio))
-    .eq("county_key", countyKey(property.county));
+  return query.eq("parcel_key", parcelKey(property.parcel));
 }
 
 async function loadPhones() {
@@ -373,8 +308,7 @@ async function addPhone(ev) {
 
   const slot = phones.reduce((m, p) => Math.max(m, p.slot || 0), 0) + 1;
   const { data, error } = await db.from("property_phones").insert({
-      folio: property.folio,
-      county: property.county || null,
+      parcel: property.parcel,
       phone: fmtPhone(raw) || raw,
       phone_type: document.getElementById("newType").value || null,
       slot,

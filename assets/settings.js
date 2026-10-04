@@ -2,12 +2,12 @@ import { db, configured, configBanner, esc, clean, getWho, mountWho, toast, relT
 import { mountSidebar } from "./nav.js";
 
 const FIELDS = {
-  folio:   { label: "Parcel Number", placeholder: "e.g. F# 077G222",
-             hint: "Matches the parcel number, with or without the “F# ” prefix." },
-  address: { label: "Address",      placeholder: "e.g. 308 Cedar Rock Mdws",
+  parcel:  { label: "Parcel Number", placeholder: "e.g. 010-000001-00",
+             hint: "Matches the parcel number, with or without its dashes." },
+  address: { label: "Address",      placeholder: "e.g. 1570 Franklin Ave",
              hint: "Matches the property address exactly, ignoring case and street-word spelling. " +
                    "An address shared by several properties removes all of them." },
-  zip:     { label: "Property zip", placeholder: "e.g. 30906",
+  zip:     { label: "Property zip", placeholder: "e.g. 43215",
              hint: "Matches the property zip exactly. A single zip can cover tens of thousands of records." }
 };
 
@@ -93,8 +93,8 @@ async function askToRemove() {
   openModal({
     count: `${n.toLocaleString()} record${n === 1 ? "" : "s"}`,
     title: "Are you sure?",
-    body: `This will be removed from <b>BuyBox</b> where ${esc(FIELDS[field].label)} is
-           <b>${esc(value)}</b>, and moved to <b>notBuyBox</b>.<br><br>
+    body: `This will be removed from <b>Buybox</b> where ${esc(FIELDS[field].label)} is
+           <b>${esc(value)}</b>, and moved to <b>notBuybox</b>.<br><br>
            Phone numbers are kept, and the removal can be undone from
            “Recently removed” below.`,
     confirmLabel: `Yes, remove ${n.toLocaleString()}`
@@ -105,7 +105,7 @@ async function askToRemove() {
       p_field: field, p_value: value, p_by: getWho() || null
     });
     if (err) { toast(err.message, true); return; }
-    toast(`Moved ${Number(moved).toLocaleString()} record(s) to notBuyBox`);
+    toast(`Moved ${Number(moved).toLocaleString()} record(s) to notBuybox`);
     valueEl.value = "";
     loadRemovals();
   };
@@ -140,21 +140,40 @@ async function loadRemovals() {
     b.addEventListener("click", () => askToRestore(b.dataset.field, b.dataset.value, Number(b.dataset.n))));
 }
 
+const RESTORE_CHUNK = 500;
+
 function askToRestore(field, value, n) {
+  const total = n;
   openModal({
     count: `${n.toLocaleString()} record${n === 1 ? "" : "s"}`,
     title: "Put these back?",
-    body: `They will move from <b>notBuyBox</b> back into <b>BuyBox</b>, under the ids
-           they had before, and reappear in search.`,
+    body: `They will move from <b>notBuybox</b> back into <b>Buybox</b> and reappear in search.
+           A parcel that has been loaded into Buybox again since stays in the archive.`,
     confirmLabel: `Yes, restore ${n.toLocaleString()}`
   });
   countEl.style.color = "var(--good)";
 
   onConfirm = async () => {
-    const { data, error } = await db.rpc("restore_to_buybox", { p_field: field, p_value: value });
+    // restore_to_buybox() puts back at most RESTORE_CHUNK per call -- one big
+    // insert would outrun the public key's timeout -- so call until it is done
+    let restored = 0;
+    for (;;) {
+      const { data, error } = await db.rpc("restore_to_buybox", {
+        p_field: field, p_value: value, max_rows: RESTORE_CHUNK
+      });
+      if (error) {
+        countEl.style.color = "";
+        toast(`${restored ? `Restored ${restored.toLocaleString()}, then: ` : ""}${error.message}`, true);
+        loadRemovals();
+        return;
+      }
+      const n = Number(data) || 0;
+      restored += n;
+      if (n === 0) break;
+      confirmBtn.textContent = `Restoring… ${restored.toLocaleString()} of ${total.toLocaleString()}`;
+    }
     countEl.style.color = "";
-    if (error) { toast(error.message, true); return; }
-    toast(`Restored ${Number(data).toLocaleString()} record(s) to BuyBox`);
+    toast(`Restored ${restored.toLocaleString()} record(s) to Buybox`);
     loadRemovals();
   };
 }

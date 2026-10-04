@@ -1,4 +1,4 @@
-import { db, clean, splitList, toast } from "./db.js";
+import { db, clean, toast } from "./db.js";
 
 const PAGE_SIZE = 1000;
 export const EXPORT_CAP = 50000;   // a browser-built CSV has to stay in memory
@@ -18,10 +18,10 @@ export function toCsv(rows) {
   );
 
   const head = [
-    "Parcel Number", "County", "Full Name", "First Name", "Last Name",
+    "Parcel Number", "Full Name", "First Name", "Last Name",
     "Property address", "Property city", "Property state", "Property zip",
     "Mailing address", "Mailing city", "Mailing state", "Mailing zip",
-    "Lists", "Phone count"
+    "Appraised Value", "Sale Date", "Sale Price", "Lists", "Phone count"
   ];
   for (let i = 1; i <= phoneCols; i++) head.push(`Phone ${i}`, `Phone ${i} Type`, `Phone ${i} Status`);
 
@@ -29,10 +29,10 @@ export function toCsv(rows) {
   for (const r of rows) {
     const phones = r.phones || [];
     const cells = [
-      r.folio, r.county, r.full_name, r.first_name, r.last_name,
+      r.parcel, r.full_name, r.first_name, r.last_name,
       r.property_address, r.property_city, r.property_state, r.property_zip,
       r.mailing_address, r.mailing_city, r.mailing_state, r.mailing_zip,
-      r.distress_lists, phones.length
+      r.appraised_value, r.sale_date, r.sale_price, r.distress_lists, phones.length
     ];
     for (let i = 0; i < phoneCols; i++) {
       const p = phones[i];
@@ -64,7 +64,7 @@ function filename(query, field, keys) {
  * Pages through export_properties and hands back a CSV.
  * onProgress(n) is called after each page so the button can show a count.
  */
-export async function exportCsv({ query, field, keys, mailedFrom, mailedTo, onProgress }) {
+export async function exportCsv({ query, field, keys, onProgress }) {
   const rows = [];
   let skip = 0;
 
@@ -74,9 +74,7 @@ export async function exportCsv({ query, field, keys, mailedFrom, mailedTo, onPr
       field: field,
       p_lists: keys.length ? keys : null,
       max_rows: PAGE_SIZE,
-      skip,
-      p_mailed_from: mailedFrom || null,
-      p_mailed_to: mailedTo || null
+      skip
     });
     if (error) { toast(error.message, true); return null; }
 

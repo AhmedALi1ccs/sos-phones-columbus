@@ -1,10 +1,10 @@
 """
 Upload a cold calling list: address, number, source.
 
-An address BuyBox knows is linked to its parcel, which is what lets a row open
-the property page. An address BuyBox does not know is still loaded, without a
+An address Buybox knows is linked to its parcel, which is what lets a row open
+the property page. An address Buybox does not know is still loaded, without a
 parcel — a calling list is worth having either way. All the work lives in
-cold_import.py.
+contact_import.py.
 """
 
 import pandas as pd
@@ -107,7 +107,7 @@ if pair:
     d.metric("Rejected", f"{bad:,}")
 
     if res["unlinked"]:
-        st.info(f"{res['unlinked']:,} of these addresses are not in BuyBox, or match more "
+        st.info(f"{res['unlinked']:,} of these addresses are not in Buybox, or match more "
                 f"than one property. They are loaded without a parcel link, so they will "
                 f"not open a property page.")
 
