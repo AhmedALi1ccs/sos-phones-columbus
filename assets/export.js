@@ -1,6 +1,8 @@
 import { db, clean, toast } from "./db.js";
 
-const PAGE_SIZE = 1000;
+// 500, not 1000: each row normalises its address to find its phone numbers,
+// and 1000 rows came within half a second of the public key's 3s timeout
+const PAGE_SIZE = 500;
 export const EXPORT_CAP = 50000;   // a browser-built CSV has to stay in memory
 const CAP = EXPORT_CAP;
 const MAX_PHONE_COLS = 30;

@@ -31,71 +31,7 @@ create index if not exists mail_parcel_idx on public."Mail" (public.parcel_norm(
 create index if not exists sms_parcel_idx  on public."SMS"  (public.parcel_norm("parcel number"));
 
 -- ---------------------------------------------------------------
--- 2. Phone numbers : one row per phone, keyed to the property by its
---    normalised parcel number.  Not a foreign key on purpose: a record
---    removed from Buybox (or reloaded) keeps its numbers.
--- ---------------------------------------------------------------
-create table if not exists public.property_phones (
-  id          bigint generated always as identity primary key,
-  parcel      text not null,                  -- as stored in Buybox, e.g. '010-000001-00'
-  parcel_key  text generated always as (upper(regexp_replace(coalesce(parcel,''), '[^A-Za-z0-9]', '', 'g'))) stored,
-  phone       text not null,
-  -- digits only, with a leading country code dropped, so that 614-555-1234,
-  -- (614) 555-1234 and 1-614-555-1234 are one number and the unique index
-  -- below actually catches the duplicate
-  phone_norm  text generated always as (
-                case when length(regexp_replace(coalesce(phone,''), '\D', '', 'g')) = 11
-                      and left(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 1) = '1'
-                     then substr(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 2)
-                     else regexp_replace(coalesce(phone,''), '\D', '', 'g')
-                end) stored,
-  slot        smallint,                       -- display order, 1..30
-  phone_type  text check (phone_type is null or phone_type in ('landline','mobile')),
-  status      text check (status is null or status in ('correct','wrong','dead')),
-  note        text,
-  updated_by  text,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
-  constraint property_phones_parcel_not_blank check (btrim(parcel) <> '')
-);
-
--- the same number cannot be listed twice on one parcel
-create unique index if not exists property_phones_uniq
-  on public.property_phones (parcel_key, phone_norm);
-create index if not exists property_phones_prop_idx
-  on public.property_phones (parcel_key, slot, id);
-create index if not exists property_phones_norm_idx on public.property_phones (phone_norm);
-
--- keep updated_at honest
-create or replace function public.tg_touch_updated_at() returns trigger language plpgsql as $$
-begin
-  new.updated_at := now();
-  return new;
-end $$;
-
-drop trigger if exists property_phones_touch on public.property_phones;
-create trigger property_phones_touch before update on public.property_phones
-  for each row execute function public.tg_touch_updated_at();
-
--- cap at 30 phones per parcel
-create or replace function public.tg_phone_cap() returns trigger language plpgsql as $$
-declare n int;
-begin
-  select count(*) into n from public.property_phones p
-   where p.parcel_key = upper(regexp_replace(coalesce(new.parcel,''), '[^A-Za-z0-9]', '', 'g'));
-  if n >= 30 then
-    raise exception 'parcel % already has 30 phone numbers', new.parcel
-      using errcode = 'check_violation';
-  end if;
-  return new;
-end $$;
-
-drop trigger if exists property_phones_cap on public.property_phones;
-create trigger property_phones_cap before insert on public.property_phones
-  for each row execute function public.tg_phone_cap();
-
--- ---------------------------------------------------------------
--- 3. Distress reasons.  "Lists" is a comma separated string whose values
+-- 2. Distress reasons.  "Lists" is a comma separated string whose values
 --    may arrive in several spellings (HIGH EQUITY / High equity,
 --    Tax Delinquent / Tax Del).  These fold them to one key per reason.
 -- ---------------------------------------------------------------
@@ -154,7 +90,7 @@ create index if not exists buybox_stack_idx
   on public."Buybox" (public.list_stack("Lists") desc, "Parcel Number") include ("Lists");
 
 -- ---------------------------------------------------------------
--- 4. Street-word folding, shared by address matching and by the search box.
+-- 3. Street-word folding, shared by address matching and by the search box.
 --    The data stores USPS abbreviations; people type words. One list, so
 --    the two can never disagree.
 -- ---------------------------------------------------------------
@@ -281,6 +217,72 @@ $$ select upper(public.fold_street_words(a)) $$;
 
 create index if not exists buybox_addr_norm_idx
   on public."Buybox" (public.addr_norm("Property address"));
+
+-- ---------------------------------------------------------------
+-- 4. Phone numbers : one row per phone, linked to the property by its
+-- address -- addr_norm() of the Buybox "Property address". Every record at
+-- that address shows the number, so the 216 condos at 364 W Lane Ave share
+-- one list. Not a foreign key on purpose: a record removed from Buybox (or
+-- reloaded) keeps its numbers.
+-- ---------------------------------------------------------------
+create table if not exists public.property_phones (
+  id          bigint generated always as identity primary key,
+  address     text not null,                  -- as Buybox spells it, e.g. '1570 franklin Ave'
+  addr_key    text generated always as (public.addr_norm(address)) stored,
+  phone       text not null,
+  -- digits only, with a leading country code dropped, so that 614-555-1234,
+  -- (614) 555-1234 and 1-614-555-1234 are one number and the unique index
+  -- below actually catches the duplicate
+  phone_norm  text generated always as (
+                case when length(regexp_replace(coalesce(phone,''), '\D', '', 'g')) = 11
+                      and left(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 1) = '1'
+                     then substr(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 2)
+                     else regexp_replace(coalesce(phone,''), '\D', '', 'g')
+                end) stored,
+  slot        smallint,                       -- display order, 1..30
+  phone_type  text check (phone_type is null or phone_type in ('landline','mobile')),
+  status      text check (status is null or status in ('correct','wrong','dead')),
+  note        text,
+  updated_by  text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint property_phones_address_not_blank check (btrim(address) <> '')
+);
+
+-- the same number cannot be listed twice at one address
+create unique index if not exists property_phones_uniq
+  on public.property_phones (addr_key, phone_norm);
+create index if not exists property_phones_addr_idx
+  on public.property_phones (addr_key, slot, id);
+create index if not exists property_phones_norm_idx on public.property_phones (phone_norm);
+
+-- keep updated_at honest
+create or replace function public.tg_touch_updated_at() returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists property_phones_touch on public.property_phones;
+create trigger property_phones_touch before update on public.property_phones
+  for each row execute function public.tg_touch_updated_at();
+
+-- cap at 30 phones per address
+create or replace function public.tg_phone_cap() returns trigger language plpgsql as $$
+declare n int;
+begin
+  select count(*) into n from public.property_phones p
+   where p.addr_key = public.addr_norm(new.address);
+  if n >= 30 then
+    raise exception 'address % already has 30 phone numbers', new.address
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists property_phones_cap on public.property_phones;
+create trigger property_phones_cap before insert on public.property_phones
+  for each row execute function public.tg_phone_cap();
 
 -- ---------------------------------------------------------------
 -- 5. The search box.  This data abbreviates street suffixes (st, ave, dr)

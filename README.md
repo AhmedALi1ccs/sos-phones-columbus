@@ -15,7 +15,7 @@ Fairfield counties, Ohio.
 - **Filter by distress** on the home page: the reasons in `Lists` as toggle chips with
   counts. Picking several narrows to records carrying **all** of them, and it combines
   with the search box. The selection lives in the URL (`?d=probate|vacant`).
-- **Export CSV** of whatever is filtered — property fields plus each parcel's phone
+- **Export CSV** of whatever is filtered — property fields plus each property's phone
   numbers flattened into `Phone 1`, `Phone 1 Type`, `Phone 1 Status`, … the same shape
   the importer reads.
 - **Retractable left sidebar** with five sections: **Search**, **Mailing**,
@@ -65,8 +65,8 @@ python3 -m http.server 8080
 | `Buybox` | you, loaded directly | Primary key `"Parcel Number"`. Read-only to the website. |
 | `Mail` | you, loaded directly | One row per mailed parcel. `"Date"` is text like `Jul-26`. Read-only to the website. |
 | `SMS` | you, loaded directly | One row per text: `Month`, `Year`, `Approach`. Carries no phone numbers. Read-only to the website. |
-| `property_phones` | the website and the uploaders | Phone numbers and their statuses, keyed by parcel. |
-| `ColdCalling` | the uploader | Address, number, source; linked to a parcel when the address matches one. |
+| `property_phones` | the website and the uploaders | Phone numbers and their statuses, filed by **property address**. |
+| `ColdCalling` | the uploader | Address, number, source; shown on every record at that address. |
 | `notBuybox` | the Remove page | Records moved out of `Buybox`, kept so they can be put back. |
 
 None of the SQL alters `Buybox`, `Mail` or `SMS`: everything on them is an expression
@@ -76,13 +76,29 @@ index, so your loads keep working unchanged.
 > parcel**. Mailing the same parcel in a second campaign will be refused by the database
 > until that key is widened (e.g. to `("Parcel Number", "Tag", "Date")`).
 
+### Phone numbers are filed by address
+
+A phone number belongs to a **property address**, not a parcel: `property_phones` stores
+the address (as Buybox spells it) and `addr_key`, its `addr_norm()`. Every Buybox record
+at that address shows the number, on the property page and in the search results, and
+the 30-number cap is per address.
+
+- 96% of records have an address no other record shares, so for them this is the same as
+  one property. The other 17,483 records sit at 3,584 shared addresses — mostly condo and
+  apartment buildings (`364 w lane ave` is 216 condos) — and every unit in a building
+  shows the building's numbers. The property page says so above the list.
+- `addr_norm()` ignores the town, so 198 street addresses (419 records) that exist in two
+  towns — `1004 harris ave` in both Columbus and Newark — share their numbers too.
+- Records whose address has no street name (`0`, on 2,663 records) cannot hold phone
+  numbers: they would show on every one of them. The page, the uploaders and the importer
+  all refuse them, with a reason.
+
 ### How things are compared
 
 - **Parcel numbers** are compared by `parcel_norm()`: punctuation stripped and
   case-folded, so `010-000001-00`, `01000000100` and `010 000001 00` are one parcel.
-  `assets/db.js` has a matching `parcelKey()` — change one and you must change the other.
-  `Parcel Number` is unique in `Buybox`, so it alone identifies a property; phone numbers
-  are keyed on it rather than on any row id.
+  `Parcel Number` is unique in `Buybox`, so it alone identifies a record — property
+  links (`property.html?parcel=…`) use it.
 - **Addresses** are compared by `addr_norm()`, which folds case, punctuation and street
   words (`street`→`st`, `avenue`→`ave`, …) from the one list in `fold_street_words()`.
   `1570 Franklin Avenue` and `1570 FRANKLIN AVE` match.
@@ -172,7 +188,7 @@ Nothing is deleted. Matching records move to **`notBuybox`**, which carries ever
 column plus `removed_at`, `removed_by`, `removed_match_field` and `removed_match_value`.
 The page lists recent removals with a **Restore** button that puts a batch back. A parcel
 that has been loaded into Buybox again in the meantime stays in the archive rather than
-clashing with it. **Phone numbers are kept** — they are keyed on the parcel.
+clashing with it. **Phone numbers are kept** — they are filed by address.
 
 > ⚠️ **This page has no login, by choice.** Anyone with the site URL can move records out
 > of Buybox. Removals are reversible from the same page, and the public key has no direct
@@ -200,32 +216,28 @@ button in the sidebar. The app connects as the database owner, not through the p
 
 | Page | What it does |
 | --- | --- |
-| Upload phone numbers | bulk load numbers against parcel numbers or addresses |
+| Upload phone numbers | bulk load numbers against property addresses (or parcel numbers) |
 | Phone status | bulk-apply statuses from a file, or set one by hand |
 | Cold calling | load a calling list: address, number, source |
 
 `Buybox`, `Mail` and `SMS` are loaded straight into Supabase, so there is no page for them.
 
-Upload a CSV/XLSX with **Property address** and **Phone**. The page matches each row to a
-Buybox property **by its property address**, the default; a **Match by** switch lets a file
-be matched by **Parcel Number** instead. Only the chosen column is used — a file that has
-both is never matched on the other one. **Phone Type**, **Status**, **City** and **Zip**
-are optional.
+Upload a CSV/XLSX with **Property address** and **Phone**. **Phone Type** and **Status**
+are optional. Each number is filed under the row's address; a **Match by** switch lets a
+file be matched by **Parcel Number** instead, in which case the number is filed under that
+parcel's address. Only the chosen column is used — a file that has both is never matched
+on the other one.
 
 Addresses are compared after folding case, punctuation and street words, so
 `1570 Franklin Avenue` matches `1570 franklin Ave`. A full address such as
 `364 W Lane Ave, Columbus, OH 43201` works too: everything after the first comma is
-ignored (no Buybox address contains one).
-
-96% of Buybox records have an address no other record shares. The rest — 17,483 records
-at 3,584 addresses — are buildings with many parcels (`364 w lane ave` alone is 216
-condos). A row at one of those is **rejected, not guessed**, because a number on the wrong
-parcel is worse than none; use the Parcel Number for those. City and Zip narrow an
-address only when the same street address exists in different towns.
+ignored (no Buybox address contains one). The address must exist in Buybox, so a typo is
+**rejected, not stored** under an address nothing will ever show. A number going to a
+shared address is accepted, and the results say how many went to one.
 
 "Check without importing" runs the whole thing in a transaction and rolls back, so you see
 the counts first. Rejected rows are listed with a reason and downloadable as CSV. The
-`samples/` files are working examples (real parcels, fake 555 numbers) that exercise each
+`samples/` files are working examples (real Buybox addresses and parcels, fake 555 numbers) that exercise each
 kind of rejection.
 
 The pipelines live in `phone_import.py`, `contact_import.py` and `status_update.py`, which
@@ -238,7 +250,8 @@ are only the interface over them.
 
 ## Importing phone numbers from the command line
 
-Long format, one row per phone:
+For files keyed by parcel number. Each number is filed under that parcel's property
+address, as the uploader does. Long format, one row per phone:
 
 ```csv
 Parcel Number,Phone,Phone Type
@@ -254,7 +267,7 @@ python3 scripts/import_phones.py Book1.csv --apply   # commit
 ```
 
 It **defaults to a dry run**. Anything it cannot place — parcel missing or not in Buybox,
-malformed number, over the 30 cap — goes to `<file>_rejects.csv` with a reason. Numbers
+a parcel with no street address, malformed number, over the 30 cap — goes to `<file>_rejects.csv` with a reason. Numbers
 already in the table are skipped, so re-running a file is safe. `--fill-type` back-fills
 `phone_type` on rows that are already there but have none. Phone Type wording is mapped:
 `Mobile`/`Wireless`/`Cell` → `mobile`, `Residential`/`Landline`/`Home` → `landline`.
@@ -263,10 +276,10 @@ already in the table are skipped, so re-running a file is safe. `--fill-type` ba
 
 | Column | Notes |
 | --- | --- |
-| `parcel` | as stored in Buybox, e.g. `010-000001-00` |
-| `parcel_key` | normalised, generated — what lookups and the unique index use |
+| `address` | the property address, as Buybox spells it, e.g. `1570 franklin Ave` |
+| `addr_key` | `addr_norm(address)`, generated — what lookups and the unique index use |
 | `phone` | as entered / displayed |
-| `phone_norm` | 10 digits, generated — unique per parcel, so a number can't be added twice |
+| `phone_norm` | 10 digits, generated — unique per address, so a number can't be added twice |
 | `slot` | display order, 1–30 |
 | `phone_type` | `landline` \| `mobile` \| `NULL` — shown as ☎️ / 📱 |
 | `status` | `correct` \| `wrong` \| `dead` \| `NULL` |
@@ -274,7 +287,7 @@ already in the table are skipped, so re-running a file is safe. `--fill-type` ba
 | `updated_by` | initials typed in the header (stored in the browser) |
 | `created_at`, `updated_at` | `updated_at` maintained by trigger |
 
-A trigger refuses the 31st number for a parcel.
+A trigger refuses the 31st number for an address.
 
 > **Note on access:** the site is deliberately open — the publishable key ships in
 > `config.js`, so anyone with the page URL can read the property list and edit phone

@@ -1,6 +1,6 @@
 import {
   db, configured, configBanner, esc, clean, digits, fmtPhone, cityLine, splitList,
-  chipsHtml, fmtSaleDate, fmtMoney, monthLabel, relTime, parcelKey, getWho, mountWho, toast,
+  chipsHtml, fmtSaleDate, fmtMoney, monthLabel, relTime, getWho, mountWho, toast,
   STATUS, NO_STATUS, PHONE_TYPE
 } from "./db.js";
 
@@ -38,7 +38,8 @@ async function load() {
   property = row;
   renderHead();
   renderBody();
-  loadPhones(); loadMailed(); loadSms(); loadColdCalls();
+  loadMailed(); loadSms(); loadColdCalls();
+  if (hasStreetAddress()) loadPhones();
 }
 
 function fail(msg) {
@@ -114,8 +115,15 @@ function renderBody() {
 
     <section class="section">
       <h2>Phone numbers <span id="phoneCount" class="hint"></span></h2>
+      ${Number(p.address_records) > 1 ? `<p class="hint" style="margin:0 0 8px">
+         Filed under the address <b>${esc(clean(p.property_address))}</b>, which
+         ${(Number(p.address_records) - 1).toLocaleString()} other record${Number(p.address_records) === 2 ? "" : "s"}
+         share — they all show these numbers.</p>` : ""}
       <div class="card phones" id="phones">
-        <div class="phone-row"><span class="skeleton" style="width:200px"></span></div>
+        ${hasStreetAddress()
+          ? `<div class="phone-row"><span class="skeleton" style="width:200px"></span></div>`
+          : `<div class="phone-row"><span class="hint">Unavailable — this record has no street address
+             (“${esc(clean(p.property_address))}”), and phone numbers are filed by address.</span></div>`}
       </div>
     </section>
 
@@ -164,7 +172,7 @@ async function loadColdCalls() {
   const { data, error } = await db
     .from("ColdCalling")
     .select("phone, source")
-    .eq("parcel_key", parcelKey(property.parcel))
+    .eq("addr_key", property.addr_key)
     .order("source", { ascending: true, nullsFirst: false })
     .order("id", { ascending: true });
 
@@ -184,8 +192,13 @@ async function loadColdCalls() {
 }
 
 /* ------------------------------- phones ------------------------------- */
+/** "0" and other placeholders are shared by thousands of records: no numbers there. */
+function hasStreetAddress() {
+  return /[A-Z]/.test(property.addr_key || "");
+}
+
 function phoneFilter(query) {
-  return query.eq("parcel_key", parcelKey(property.parcel));
+  return query.eq("addr_key", property.addr_key);
 }
 
 async function loadPhones() {
@@ -229,7 +242,7 @@ function renderPhones() {
 
   host.innerHTML =
     (phones.length ? phones.map(phoneRowHtml).join("")
-                   : `<div class="phone-row"><span class="hint">No phone numbers yet for this parcel.</span></div>`) +
+                   : `<div class="phone-row"><span class="hint">No phone numbers yet for this address.</span></div>`) +
     `<form class="addform" id="addForm">
        <input type="tel"  class="tel" id="newPhone" placeholder="Add phone number" ${full ? "disabled" : ""}>
        <select class="typesel" id="newType" ${full ? "disabled" : ""}>
@@ -304,11 +317,11 @@ async function addPhone(ev) {
   const d = digits(raw);
 
   if (d.length < 7) { toast("That does not look like a phone number", true); return; }
-  if (phones.some((p) => digits(p.phone) === d)) { toast("Already listed on this parcel", true); return; }
+  if (phones.some((p) => digits(p.phone) === d)) { toast("Already listed at this address", true); return; }
 
   const slot = phones.reduce((m, p) => Math.max(m, p.slot || 0), 0) + 1;
   const { data, error } = await db.from("property_phones").insert({
-      parcel: property.parcel,
+      address: property.property_address,
       phone: fmtPhone(raw) || raw,
       phone_type: document.getElementById("newType").value || null,
       slot,
@@ -316,7 +329,7 @@ async function addPhone(ev) {
     }).select().single();
 
   if (error) {
-    toast(error.code === "23505" ? "That number is already on this parcel" : error.message, true);
+    toast(error.code === "23505" ? "That number is already listed at this address" : error.message, true);
     return;
   }
   phones.push(data);
@@ -328,7 +341,7 @@ async function addPhone(ev) {
 async function removePhone(phoneId) {
   const ph = phones.find((p) => p.id === phoneId);
   if (!ph) return;
-  if (!confirm(`Remove ${fmtPhone(ph.phone)} from this parcel?`)) return;
+  if (!confirm(`Remove ${fmtPhone(ph.phone)} from this address?`)) return;
 
   rowBusy(phoneId, true);
   const { error } = await db.from("property_phones").delete().eq("id", phoneId);

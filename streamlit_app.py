@@ -27,17 +27,16 @@ conn_params = sidebar_connection()
 # --------------------------------------------------------------------------
 st.title("📞 Upload phone numbers")
 st.caption(
-    "Each row is matched to a property in Buybox by its property address (or, if you "
-    "choose, its Parcel Number). Anything missing, unknown, or shared by more than one "
-    "property is reported instead of guessed at."
+    "Phone numbers are filed under the property address: every Buybox record at that "
+    "address shows them. Each row is matched by its address (or, if you choose, by the "
+    "address of its Parcel Number); an address Buybox does not know is reported, not stored."
 )
 
 upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"])
 if not upload:
     st.info(
-        "Upload a file with **Property address** and **Phone**. **Phone Type**, **Status**, "
-        "**City** and **Zip** are optional; City and Zip only help with an address that "
-        "belongs to more than one property. A full address such as "
+        "Upload a file with **Property address** and **Phone**. **Phone Type** and "
+        "**Status** are optional. A full address such as "
         "*364 W Lane Ave, Columbus, OH 43201* is fine — everything after the first comma "
         "is ignored."
     )
@@ -73,14 +72,9 @@ FIELDS = [
     ("ptype",   "Phone Type", ("Phone Type", "Type", "Line Type")),
     ("status",  "Status",     ("Status", "Result", "Outcome", "Phone Status")),
 ]
-if match_by == "address":
-    FIELDS += [
-        ("city", "City", ("Property city", "City")),
-        ("zip",  "Zip",  ("Property zip", "Zip", "Zipcode", "Postal Code")),
-    ]
 
 # only the chosen key is staged: a row is never matched on the other one
-mapping = {"parcel": None, "address": None, "city": None, "zip": None}
+mapping = {"parcel": None, "address": None}
 for box, (field, label, names) in zip(st.columns(len(FIELDS)), FIELDS):
     with box:
         g = guess(cols, *names)
@@ -110,7 +104,7 @@ def show(res, committed):
     bad = sum(n for reason, n in res["reasons"] if reason)
 
     cols = st.columns(5 if res.get("status_changed") else 4)
-    cols[0].metric("Matched to a parcel", f"{res['loadable']:,}")
+    cols[0].metric("Matched to an address", f"{res['loadable']:,}")
     cols[1].metric("Inserted" if committed else "Would insert", f"{ok:,}")
     cols[2].metric("Already on file", f"{res['already_there']:,}")
     cols[3].metric("Rejected", f"{bad:,}")
@@ -121,15 +115,17 @@ def show(res, committed):
     if by:
         st.caption("Resolved by " + ", ".join(f"**{n:,}** {k}" for k, n in sorted(by.items())))
 
+    if res.get("shared"):
+        st.info(f"{res['shared']:,} number(s) go to an address that more than one Buybox record "
+                f"shares (a condo or apartment building); every record there will show them.")
     if res["over_cap"]:
-        st.warning(f"{res['over_cap']:,} number(s) skipped — those parcels already hold {MAX_PHONES}.")
+        st.warning(f"{res['over_cap']:,} number(s) skipped — those addresses already hold {MAX_PHONES}.")
 
     if res["preview"]:
         st.subheader("What this attaches")
         st.dataframe(pd.DataFrame(
             res["preview"],
-            columns=["Matched by", "Parcel Number", "Phone", "Type", "Status",
-                     "Buybox address", "Owner"],
+            columns=["Matched by", "Address", "Records at address", "Phone", "Type", "Status"],
         ), use_container_width=True)
 
     if bad:
@@ -139,8 +135,7 @@ def show(res, committed):
                 st.write(f"- **{n:,}** — {reason}")
         rej = pd.DataFrame(
             res["rejects"],
-            columns=["Row", "Parcel Number", "Address", "City", "Zip",
-                     "Phone", "Phone Type", "Status", "Reason"],
+            columns=["Row", "Parcel Number", "Address", "Phone", "Phone Type", "Status", "Reason"],
         )
         st.dataframe(rej.head(200), use_container_width=True)
         st.download_button("Download all rejected rows (CSV)",

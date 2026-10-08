@@ -37,11 +37,6 @@ export const esc = (s) =>
 
 export const clean = (s) => (s == null ? "" : String(s).trim());
 
-/** Must match parcel_norm() in sql/01_schema.sql exactly. */
-export function parcelKey(p) {
-  return String(p ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-}
-
 /** The href for a property: keyed by parcel number, so it survives a Buybox reload. */
 export function propertyHref(parcel) {
   return "property.html?parcel=" + encodeURIComponent(clean(parcel));

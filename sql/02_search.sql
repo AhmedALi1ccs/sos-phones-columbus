@@ -132,7 +132,7 @@ declare
       b."Mailing address", b."Mailing city", b."Mailing state", b."Mailing zip",
       b."Lists", public.list_stack(b."Lists"),
       (select count(*) from public.property_phones p
-        where p.parcel_key = public.parcel_norm(b."Parcel Number"))$$;
+        where p.addr_key = public.addr_norm(b."Property address"))$$;
 
   rank_cap   constant int := 10000;
   -- nothing typed, or too much matched: the heaviest stack is the most
@@ -322,7 +322,7 @@ as $$
              'phone', p.phone, 'type', p.phone_type, 'status', p.status)
            order by p.slot, p.id) as j
     from public.property_phones p
-    where p.parcel_key = public.parcel_norm(s.parcel)
+    where p.addr_key = public.addr_norm(s.property_address)
   ) ph on true;
 $$;
 
@@ -348,7 +348,9 @@ returns table (
   sale_date        text,
   sale_price       text,
   lists            text,
-  tags             text
+  tags             text,
+  addr_key         text,            -- what property_phones files this record's numbers under
+  address_records  bigint           -- how many Buybox records share that address, this one included
 )
 language sql
 stable
@@ -356,7 +358,10 @@ as $$
   select b."Parcel Number", b."Full Name", b."First Name", b."Last Name",
          b."Property address", b."Property city", b."Property state", b."Property zip",
          b."Mailing address", b."Mailing city", b."Mailing state", b."Mailing zip",
-         b."Appriased Value", b."Sale Date", b."Sale Price", b."Lists", b."Tags"
+         b."Appriased Value", b."Sale Date", b."Sale Price", b."Lists", b."Tags",
+         public.addr_norm(b."Property address"),
+         (select count(*) from public."Buybox" o
+           where public.addr_norm(o."Property address") = public.addr_norm(b."Property address"))
   from public."Buybox" b
   where public.parcel_norm(b."Parcel Number") = public.parcel_norm(p_parcel)
   limit 1;

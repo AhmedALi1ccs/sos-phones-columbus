@@ -37,7 +37,7 @@ with bulk_tab:
     upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"], key="status_file")
     if not upload:
         st.info("Upload a file with **Property address** (or **Parcel Number**), **Phone** and "
-                "**Status**. **Type**, **City** and **Zip** are optional.")
+                "**Status**. **Type** is optional.")
     else:
         df = read_upload(upload)
         st.success(f"Read **{len(df):,}** rows · {len(df.columns)} columns")
@@ -61,11 +61,8 @@ with bulk_tab:
             ("status",  "Status *",      ("Status", "Result", "Outcome", "Phone Status")),
             ("ptype",   "Type",          ("Phone Type", "Type", "Line Type")),
         ]
-        if match_by == "address":
-            FIELDS += [("city", "City", ("Property city", "City")),
-                       ("zip",  "Zip",  ("Property zip", "Zip", "Zipcode"))]
         # only the chosen key is staged: a row is never matched on the other one
-        mapping = {"parcel": None, "address": None, "city": None, "zip": None}
+        mapping = {"parcel": None, "address": None}
         for box, (field, label, names) in zip(st.columns(len(FIELDS)), FIELDS):
             with box:
                 g = guess(cols, *names)
@@ -125,8 +122,8 @@ with bulk_tab:
 
         if res["preview"]:
             st.dataframe(pd.DataFrame(res["preview"], columns=[
-                "Matched by", "Parcel Number", "Phone", "Type", "Status",
-                "Property address", "Owner"]), use_container_width=True)
+                "Matched by", "Address", "Records at address", "Phone", "Type", "Status"]),
+                use_container_width=True)
 
         if bad:
             st.subheader("Rejected rows")
@@ -134,8 +131,7 @@ with bulk_tab:
                 if reason:
                     st.write(f"- **{n:,}** — {reason}")
             rej = pd.DataFrame(res["rejects"], columns=[
-                "Row", "Parcel Number", "Address", "City", "Zip",
-                "Phone", "Type", "Status", "Reason"])
+                "Row", "Parcel Number", "Address", "Phone", "Type", "Status", "Reason"])
             st.dataframe(rej.head(200), use_container_width=True)
             st.download_button("Download all rejected rows (CSV)",
                                rej.to_csv(index=False).encode("utf-8"),
@@ -160,12 +156,7 @@ with one_tab:
             key_value = st.text_input("Address or Parcel Number",
                                       placeholder="1570 Franklin Ave  —  or  010-000004-00")
 
-        c, d, e = st.columns(3)
-        phone = c.text_input("Phone number", placeholder="(614) 555-0142")
-        city = d.text_input("City", placeholder="optional")
-        zipcode = e.text_input("Zip", placeholder="optional")
-        st.caption("City and Zip are only needed when an address turns out to belong "
-                   "to more than one property.")
+        phone = st.text_input("Phone number", placeholder="(614) 555-0142")
 
         if st.form_submit_button("Look it up", type="primary", use_container_width=True):
             if not conn_params["password"]:
@@ -173,8 +164,7 @@ with one_tab:
             else:
                 try:
                     st.session_state["status_hit"] = look_up(
-                        conn_params, key_field=key_field, key_value=key_value, phone=phone,
-                        city=city, zipcode=zipcode)
+                        conn_params, key_field=key_field, key_value=key_value, phone=phone)
                     st.session_state.pop("status_done", None)
                 except Exception as exc:                       # noqa: BLE001
                     st.session_state.pop("status_hit", None)
@@ -193,14 +183,15 @@ with one_tab:
 
     st.divider()
     st.subheader(prop["property_address"] or "(no property address)")
-    st.caption(f"{prop['full_name'] or '—'}  ·  {prop['property_city'] or ''}  ·  "
-               f"{prop['parcel']}")
+    st.caption(f"{prop['full_name'] or '—'}  ·  {prop['property_city'] or ''}" +
+               (f"  ·  shared by {prop['records']:,} Buybox records, who all show these numbers"
+                if prop["records"] > 1 else ""))
 
     if existing:
-        st.success(f"**{existing['phone']}** is already on this property — "
+        st.success(f"**{existing['phone']}** is already filed under this address — "
                    f"current status: **{STATUSES.get(existing['status'], NO_STATUS)}**")
     else:
-        st.warning(f"**{pretty_phone(hit['digits'])}** is not on this property yet. "
+        st.warning(f"**{pretty_phone(hit['digits'])}** is not filed under this address yet. "
                    f"Saving will add it.")
 
     if hit["phones"]:
@@ -212,7 +203,7 @@ with one_tab:
             "By": p["updated_by"] or "",
         } for p in hit["phones"]]), use_container_width=True, hide_index=True)
     else:
-        st.caption("This property has no phone numbers yet.")
+        st.caption("This address has no phone numbers yet.")
 
     st.divider()
     g, h, i = st.columns([2, 1, 1])
@@ -229,17 +220,16 @@ with one_tab:
 
     if st.button("Save status", type="primary", use_container_width=True):
         try:
-            res = apply_status(conn_params, parcel=prop["parcel"],
+            res = apply_status(conn_params, address=prop["property_address"],
                                digits=hit["digits"], status=choice,
                                phone_type=new_type or None, updated_by=who or None,
                                commit=True)
             st.session_state["status_done"] = res
             # re-read so the table reflects what was just saved
             st.session_state["status_hit"] = look_up(
-                conn_params, key_field=key_field or "address",
-                key_value=prop["parcel"] if key_field == "parcel" else prop["property_address"],
-                phone=pretty_phone(hit["digits"]),
-                city=city, zipcode=zipcode)
+                conn_params, key_field="address",
+                key_value=prop["property_address"],
+                phone=pretty_phone(hit["digits"]))
             st.rerun()
         except Exception as exc:                               # noqa: BLE001
             st.error(f"Could not save: {exc}")

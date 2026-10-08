@@ -1,11 +1,10 @@
-Parcel Number,Address,City,Zip,Phone,Phone Type
-010-000001-00,,,,6145551000,Residential
-01000000200,,,,6145551001,Mobile
-,1570 Franklin Avenue,,,6145551002,Mobile
-,4644 Summit Street,,,(614) 555-1003,Wireless
-010-000001-00,,,,614-555-1000,Mobile
-,603 olde towne ave,,,6145551004,
-,12 Nowhere Lane,,,6145551005,Mobile
-999-999999-99,,,,6145551006,Mobile
-,,,,6145551007,
-010-000001-00,,,,555,Mobile
+Property Address,Phone,Phone Type
+"1570 Franklin Avenue, Columbus, OH 43205",6145551002,Mobile
+4644 Summit Street,(614) 555-1003,Wireless
+872-874 summit st,6145551000,Residential
+364 W Lane Ave,6145551010,Mobile
+364 West Lane Avenue,614-555-1010,
+0,6145551011,Mobile
+12 Nowhere Lane,6145551005,Mobile
+,6145551007,
+1570 Franklin Ave,555,Mobile

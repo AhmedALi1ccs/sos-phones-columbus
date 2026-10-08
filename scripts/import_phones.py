@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Import phone numbers into public.property_phones, linking them to Buybox by parcel number.
+Import phone numbers into public.property_phones from a file keyed by parcel number.
+
+Numbers are filed under the parcel's property address, as the website and the
+uploader do: every Buybox record at that address shows them. (Files keyed by
+address go through the Streamlit uploader, ./run_upload.sh.)
 
     python3 scripts/import_phones.py Book1.csv              # dry run, changes nothing
     python3 scripts/import_phones.py Book1.csv --apply      # actually write
@@ -199,41 +203,53 @@ def main():
     buf.seek(0)
     cur.copy_expert("copy stage from stdin with (format csv, delimiter e'\\t', null '')", buf)
 
-    # stored under Buybox's own spelling of the parcel, whatever the file wrote
+    # filed under the parcel's address, in Buybox's spelling
     cur.execute("""
         create temp table resolved on commit drop as
-        select s.*, b."Parcel Number" as buybox_parcel
+        select s.*, b."Property address" as address, public.addr_norm(b."Property address") as addr_key
         from stage s
         left join public."Buybox" b
           on public.parcel_norm(b."Parcel Number") = s.parcel_key""")
 
     cur.execute("select parcel, phone, coalesce(phone_type,''), coalesce(status,'') "
-                "from resolved where buybox_parcel is null")
+                "from resolved where address is null")
     missing = cur.fetchall()
     no_match = len(missing)
     rejects.extend([(a, b, c, d, "Parcel Number not found in Buybox") for a, b, c, d in missing])
+
+    # "0" and other placeholders are shared by thousands of records
+    cur.execute("select parcel, phone, coalesce(phone_type,''), coalesce(status,''), address "
+                "from resolved where address is not null and addr_key !~ '[A-Z]'")
+    no_street = cur.fetchall()
+    rejects.extend([(a, b, c, d, f'Buybox has no street address for this parcel ("{e}")')
+                    for a, b, c, d, e in no_street])
 
     # ---------- 3. insert, respecting the 30-per-parcel cap ----------
     cur.execute("""
         create temp table ranked on commit drop as
         select ok.*,
                coalesce(e.n, 0) as already,
-               row_number() over (partition by ok.parcel_key order by ok.src_line) as rn
-        from (select * from resolved where buybox_parcel is not null) ok
+               row_number() over (partition by ok.addr_key order by ok.src_line) as rn
+        from (
+          -- two parcels in one building can list the same number: file it once
+          select distinct on (addr_key, phone_norm) * from resolved
+          where addr_key ~ '[A-Z]'
+          order by addr_key, phone_norm, src_line
+        ) ok
         left join (
-          select parcel_key, count(*) n from public.property_phones group by 1
-        ) e on e.parcel_key = ok.parcel_key""")
+          select addr_key, count(*) n from public.property_phones group by 1
+        ) e on e.addr_key = ok.addr_key""")
     cur.execute(f"select count(*) from ranked where already + rn <= {MAX_PHONES}")
     will_insert = cur.fetchone()[0]
     cur.execute(f"select count(*) from ranked where already + rn > {MAX_PHONES}")
     over_cap = cur.fetchone()[0]
 
     cur.execute(f"""
-        insert into public.property_phones (parcel, phone, phone_type, status, note, slot, updated_by)
-        select buybox_parcel, phone, phone_type, status, note, already + rn, 'import'
+        insert into public.property_phones (address, phone, phone_type, status, note, slot, updated_by)
+        select address, phone, phone_type, status, note, already + rn, 'import'
         from ranked
         where already + rn <= {MAX_PHONES}
-        on conflict (parcel_key, phone_norm) do nothing""")
+        on conflict (addr_key, phone_norm) do nothing""")
     inserted = cur.rowcount
     skipped_existing = will_insert - inserted
 
@@ -243,7 +259,7 @@ def main():
             update public.property_phones p
                set phone_type = t.phone_type
               from ranked t
-             where p.parcel_key = t.parcel_key
+             where p.addr_key   = t.addr_key
                and p.phone_norm = t.phone_norm
                and p.phone_type is null
                and t.phone_type is not null""")
@@ -252,7 +268,8 @@ def main():
     print(f"""
   matched to a parcel ....... {will_insert + over_cap}
   Parcel Number not in Buybox  {no_match}
-  over the {MAX_PHONES}-number cap ..... {over_cap}
+  no street address ......... {len(no_street)}
+  over the {MAX_PHONES}-per-address cap  {over_cap}
   already in the table ...... {skipped_existing}
   INSERTED .................. {inserted}{f'''
   phone_type back-filled .... {filled}''' if args.fill_type else ''}""")
