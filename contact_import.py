@@ -49,7 +49,8 @@ from stage s
 left join lateral (
   select min(bb."Parcel Number") as parcel, count(*) as parcels
   from public."Buybox" bb
-  where public.addr_norm(bb."Property address") = public.addr_norm(s.address)
+  -- only the street part: "364 W Lane Ave, Columbus, OH 43201" matches too
+  where public.addr_norm(bb."Property address") = public.addr_norm(split_part(s.address, ',', 1))
 ) b on true;
 
 create temp table classified on commit drop as

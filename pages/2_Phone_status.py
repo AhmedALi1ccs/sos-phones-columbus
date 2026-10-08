@@ -36,7 +36,7 @@ with bulk_tab:
 
     upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"], key="status_file")
     if not upload:
-        st.info("Upload a file with **Address** (or **Parcel Number**), **Phone** and "
+        st.info("Upload a file with **Property address** (or **Parcel Number**), **Phone** and "
                 "**Status**. **Type**, **City** and **Zip** are optional.")
     else:
         df = read_upload(upload)
@@ -47,30 +47,40 @@ with bulk_tab:
         cols = list(df.columns)
         opts = [NONE] + cols
         st.subheader("Columns")
-        boxes = st.columns(7)
+        match_by = st.radio(
+            "Match each row to a property by", ["address", "parcel"],
+            format_func=lambda v: "Property address" if v == "address" else "Parcel Number",
+            horizontal=True, key="s_match_by")
+        KEY_FIELD = (("address", "Property address *",
+                      ("Property address", "Address", "PropertyAddress", "Site address", "Street"))
+                     if match_by == "address" else
+                     ("parcel", "Parcel Number *", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")))
         FIELDS = [
-            ("address", "Address",       ("Address", "Property address", "Street")),
+            KEY_FIELD,
             ("phone",   "Phone *",       ("Phone", "Phone Number", "Number")),
             ("status",  "Status *",      ("Status", "Result", "Outcome", "Phone Status")),
             ("ptype",   "Type",          ("Phone Type", "Type", "Line Type")),
-            ("parcel",  "Parcel Number", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")),
-            ("city",    "City",          ("City", "Property city")),
-            ("zip",     "Zip",           ("Zip", "Property zip", "Zipcode")),
         ]
-        mapping = {}
-        for box, (field, label, names) in zip(boxes, FIELDS):
+        if match_by == "address":
+            FIELDS += [("city", "City", ("Property city", "City")),
+                       ("zip",  "Zip",  ("Property zip", "Zip", "Zipcode"))]
+        # only the chosen key is staged: a row is never matched on the other one
+        mapping = {"parcel": None, "address": None, "city": None, "zip": None}
+        for box, (field, label, names) in zip(st.columns(len(FIELDS)), FIELDS):
             with box:
                 g = guess(cols, *names)
-                choice = st.selectbox(label, opts, index=opts.index(g) if g else 0, key=f"sc_{field}")
+                choice = st.selectbox(label, opts, index=opts.index(g) if g else 0,
+                                      key=f"sc_{match_by}_{field}")
                 mapping[field] = None if choice == NONE else choice
 
         problems = []
+        if not mapping[match_by]:
+            problems.append("a **Property address** column" if match_by == "address"
+                            else "a **Parcel Number** column")
         if not mapping["phone"]:
             problems.append("a **Phone** column")
         if not mapping["status"]:
             problems.append("a **Status** column")
-        if not mapping["address"] and not mapping["parcel"]:
-            problems.append("either an **Address** or a **Parcel Number** column")
         if problems:
             st.error("This file still needs " + " and ".join(problems) + ".")
         else:

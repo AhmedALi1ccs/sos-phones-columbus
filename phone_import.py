@@ -104,7 +104,9 @@ left join lateral (
          count(*)               filter (where %(narrow)s)                        as parcels,
          count(*)                                                                as parcels_before_narrowing
   from public."Buybox" b
-  where public.addr_norm(b."Property address") = public.addr_norm(s.address)
+  -- only the street part: a file may write "364 W Lane Ave, Columbus, OH 43201",
+  -- and no Buybox address contains a comma
+  where public.addr_norm(b."Property address") = public.addr_norm(split_part(s.address, ',', 1))
 ) ba on true;
 
 create temp table classified on commit drop as

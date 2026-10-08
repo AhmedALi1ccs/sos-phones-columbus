@@ -206,11 +206,22 @@ button in the sidebar. The app connects as the database owner, not through the p
 
 `Buybox`, `Mail` and `SMS` are loaded straight into Supabase, so there is no page for them.
 
-Upload a CSV/XLSX with **Phone**, plus either a **Parcel Number** or an **Address**. A mix
-is fine: a row with a parcel number uses it directly and skips the address lookup.
-**Phone Type**, **City** and **Zip** are optional; City and Zip only matter for an address
-that belongs to several parcels (`603 olde towne ave` is 10 condos). Those rows are
-**rejected, not guessed**, because a number on the wrong parcel is worse than none.
+Upload a CSV/XLSX with **Property address** and **Phone**. The page matches each row to a
+Buybox property **by its property address**, the default; a **Match by** switch lets a file
+be matched by **Parcel Number** instead. Only the chosen column is used — a file that has
+both is never matched on the other one. **Phone Type**, **Status**, **City** and **Zip**
+are optional.
+
+Addresses are compared after folding case, punctuation and street words, so
+`1570 Franklin Avenue` matches `1570 franklin Ave`. A full address such as
+`364 W Lane Ave, Columbus, OH 43201` works too: everything after the first comma is
+ignored (no Buybox address contains one).
+
+96% of Buybox records have an address no other record shares. The rest — 17,483 records
+at 3,584 addresses — are buildings with many parcels (`364 w lane ave` alone is 216
+condos). A row at one of those is **rejected, not guessed**, because a number on the wrong
+parcel is worse than none; use the Parcel Number for those. City and Zip narrow an
+address only when the same street address exists in different towns.
 
 "Check without importing" runs the whole thing in a transaction and rolls back, so you see
 the counts first. Rejected rows are listed with a reason and downloadable as CSV. The

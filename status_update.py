@@ -40,7 +40,8 @@ def _resolve_sql(by_parcel, city, zipcode):
     predicate as an OR and cost the query its index.
     """
     where = [('public.parcel_norm(b."Parcel Number") = public.parcel_norm(%(key)s)' if by_parcel
-              else 'public.addr_norm(b."Property address") = public.addr_norm(%(key)s)')]
+              # only the street part: "364 W Lane Ave, Columbus, OH 43201" matches too
+              else 'public.addr_norm(b."Property address") = public.addr_norm(split_part(%(key)s, \',\', 1))')]
     if city:
         where.append('lower(btrim(b."Property city")) = lower(btrim(%(city)s))')
     if zipcode:

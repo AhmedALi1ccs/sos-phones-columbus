@@ -27,18 +27,19 @@ conn_params = sidebar_connection()
 # --------------------------------------------------------------------------
 st.title("📞 Upload phone numbers")
 st.caption(
-    "Rows carrying a Parcel Number use it as-is; the rest are resolved against Buybox by "
-    "address. Anything missing, unknown, or shared by more than one parcel is "
-    "reported instead of guessed at."
+    "Each row is matched to a property in Buybox by its property address (or, if you "
+    "choose, its Parcel Number). Anything missing, unknown, or shared by more than one "
+    "property is reported instead of guessed at."
 )
 
 upload = st.file_uploader("CSV or Excel file", type=["csv", "xlsx", "xls"])
 if not upload:
     st.info(
-        "Upload a file with **Phone**, plus either a **Parcel Number** or an **Address** "
-        "(a mix is fine — rows with a Parcel Number skip the address lookup). "
-        "**Phone Type**, **Status**, **City** and **Zip** are optional; "
-        "a Status column is applied to numbers that are already on file too."
+        "Upload a file with **Property address** and **Phone**. **Phone Type**, **Status**, "
+        "**City** and **Zip** are optional; City and Zip only help with an address that "
+        "belongs to more than one property. A full address such as "
+        "*364 W Lane Ave, Columbus, OH 43201* is fine — everything after the first comma "
+        "is ignored."
     )
     st.stop()
 
@@ -55,31 +56,44 @@ cols = list(df.columns)
 opts = [NONE] + cols
 
 st.subheader("Columns")
-st.caption("A row with a Parcel Number uses it directly. Only rows without one are looked up by address.")
-boxes = st.columns(7)
+match_by = st.radio(
+    "Match each row to a property by",
+    ["address", "parcel"],
+    format_func=lambda v: "Property address" if v == "address" else "Parcel Number",
+    horizontal=True,
+)
 
+ADDRESS_NAMES = ("Property address", "Address", "PropertyAddress", "Property Street",
+                 "Site address", "Situs address", "Street")
+KEY_FIELD = (("address", "Property address *", ADDRESS_NAMES) if match_by == "address" else
+             ("parcel", "Parcel Number *", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")))
 FIELDS = [
-    ("parcel",  "Parcel Number", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")),
-    ("address", "Address",    ("Address", "Property address", "PropertyAddress", "Street")),
+    KEY_FIELD,
     ("phone",   "Phone *",    ("Phone", "Phone Number", "Number")),
     ("ptype",   "Phone Type", ("Phone Type", "Type", "Line Type")),
     ("status",  "Status",     ("Status", "Result", "Outcome", "Phone Status")),
-    ("city",    "City",       ("City", "Property city")),
-    ("zip",     "Zip",        ("Zip", "Property zip", "Zipcode", "Postal Code")),
 ]
+if match_by == "address":
+    FIELDS += [
+        ("city", "City", ("Property city", "City")),
+        ("zip",  "Zip",  ("Property zip", "Zip", "Zipcode", "Postal Code")),
+    ]
 
-mapping = {}
-for box, (field, label, names) in zip(boxes, FIELDS):
+# only the chosen key is staged: a row is never matched on the other one
+mapping = {"parcel": None, "address": None, "city": None, "zip": None}
+for box, (field, label, names) in zip(st.columns(len(FIELDS)), FIELDS):
     with box:
         g = guess(cols, *names)
-        choice = st.selectbox(label, opts, index=opts.index(g) if g else 0, key=f"col_{field}")
+        choice = st.selectbox(label, opts, index=opts.index(g) if g else 0,
+                              key=f"col_{match_by}_{field}")
         mapping[field] = None if choice == NONE else choice
 
 problems = []
+if not mapping[match_by]:
+    problems.append("a **Property address** column" if match_by == "address"
+                    else "a **Parcel Number** column")
 if not mapping["phone"]:
     problems.append("a **Phone** column")
-if not mapping["parcel"] and not mapping["address"]:
-    problems.append("either a **Parcel Number** or an **Address** column")
 if problems:
     st.error("This file still needs " + " and ".join(problems) + ".")
     st.stop()
