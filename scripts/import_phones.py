@@ -186,7 +186,9 @@ def main():
         return
 
     # ---------- 2. match to Buybox + load ----------
-    conn = psycopg2.connect(**DSN)
+    # keepalives: a long insert otherwise gets its idle connection dropped
+    conn = psycopg2.connect(**DSN, keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=6)
+    conn.cursor().execute("set statement_timeout = 0")
     conn.autocommit = False
     cur = conn.cursor()
 

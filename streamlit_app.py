@@ -11,7 +11,7 @@ dependency, so the pipeline can be tested without a browser.
 import pandas as pd
 import streamlit as st
 
-from phone_import import MAX_PHONES, build_stage, run
+from phone_import import MAX_PHONES, build_stage, run, wide_phone_columns
 from st_db import guess, read_upload, sidebar_connection
 
 st.set_page_config(page_title="SOS Phones — Upload", page_icon="📞", layout="wide")
@@ -62,19 +62,26 @@ match_by = st.radio(
     horizontal=True,
 )
 
-ADDRESS_NAMES = ("Property address", "Address", "PropertyAddress", "Property Street",
-                 "Site address", "Situs address", "Street")
+ADDRESS_NAMES = ("Property address", "Input Property Address", "Address", "PropertyAddress",
+                 "Property Street", "Site address", "Situs address", "Street")
 KEY_FIELD = (("address", "Property address *", ADDRESS_NAMES) if match_by == "address" else
              ("parcel", "Parcel Number *", ("Parcel Number", "Parcel", "parcel_number", "APN", "FOLIO")))
-FIELDS = [
-    KEY_FIELD,
-    ("phone",   "Phone *",    ("Phone", "Phone Number", "Number")),
-    ("ptype",   "Phone Type", ("Phone Type", "Type", "Line Type")),
-    ("status",  "Status",     ("Status", "Result", "Outcome", "Phone Status")),
-]
+# a skip-trace export: Phone1, Phone1 Type, Phone2, ... on one row per property
+wide = wide_phone_columns(cols)
+if wide:
+    st.caption(f"Found **{len(wide)} phone columns** ({wide[0][0]} … {wide[-1][0]}) — every "
+               f"filled one is loaded, with its type"
+               f"{'' if all(t for _, t in wide) else ' where the file gives one'}.")
+FIELDS = [KEY_FIELD]
+if not wide:
+    FIELDS += [
+        ("phone", "Phone *",    ("Phone", "Phone Number", "Number")),
+        ("ptype", "Phone Type", ("Phone Type", "Type", "Line Type")),
+    ]
+FIELDS += [("status", "Status", ("Status", "Result", "Outcome", "Phone Status"))]
 
 # only the chosen key is staged: a row is never matched on the other one
-mapping = {"parcel": None, "address": None}
+mapping = {"parcel": None, "address": None, "phone_cols": wide}
 for box, (field, label, names) in zip(st.columns(len(FIELDS)), FIELDS):
     with box:
         g = guess(cols, *names)
@@ -86,7 +93,7 @@ problems = []
 if not mapping[match_by]:
     problems.append("a **Property address** column" if match_by == "address"
                     else "a **Parcel Number** column")
-if not mapping["phone"]:
+if not wide and not mapping["phone"]:
     problems.append("a **Phone** column")
 if problems:
     st.error("This file still needs " + " and ".join(problems) + ".")
@@ -94,6 +101,8 @@ if problems:
 
 updated_by = st.text_input("Record these as entered by", value="upload", max_chars=16)
 stage = build_stage(df, mapping)
+if wide:
+    st.caption(f"That is **{len(stage):,}** phone numbers across {len(df):,} rows.")
 
 
 # --------------------------------------------------------------------------
@@ -147,14 +156,18 @@ def go(commit):
     if not conn_params["password"]:
         st.error("No database password — set it in the sidebar.")
         return
+    # a skip-trace file of half a million numbers takes several minutes
+    bar = st.progress(0.0, text="Starting…")
     try:
-        with st.spinner("Resolving against Buybox…" if not commit else "Importing…"):
-            st.session_state["result"] = (
-                run(stage, conn_params=conn_params, updated_by=updated_by, commit=commit,
-                    set_status=bool(mapping.get("status"))),
-                commit,
-            )
+        st.session_state["result"] = (
+            run(stage, conn_params=conn_params, updated_by=updated_by, commit=commit,
+                set_status=bool(mapping.get("status")),
+                progress=lambda f, msg: bar.progress(min(max(f, 0.0), 1.0), text=msg)),
+            commit,
+        )
+        bar.empty()
     except Exception as exc:                               # noqa: BLE001
+        bar.empty()
         st.session_state.pop("result", None)
         st.error(f"Import failed, nothing was written: {exc}")
 

@@ -18,6 +18,8 @@ import io
 import pandas as pd
 import psycopg2
 
+from phone_import import KEEPALIVE
+
 STAGE_COLUMNS = ["row_no", "address", "phone", "source"]
 
 
@@ -102,7 +104,7 @@ def run(stage, *, conn_params, table="ColdCalling", source_label="upload", commi
     stage.to_csv(buf, index=False, header=False)
     buf.seek(0)
 
-    conn = psycopg2.connect(**conn_params)
+    conn = psycopg2.connect(**{**KEEPALIVE, **conn_params})
     try:
         with conn.cursor() as cur:
             cur.execute(RESOLVE_SQL)

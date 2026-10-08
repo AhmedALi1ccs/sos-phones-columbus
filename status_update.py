@@ -13,6 +13,8 @@ import re
 import psycopg2
 import psycopg2.extras
 
+from phone_import import KEEPALIVE
+
 STATUSES = {
     "correct": "✅ Correct",
     "wrong":   "❌ Wrong",
@@ -64,7 +66,7 @@ def look_up(conn_params, *, key_field, key_value, phone):
     if not digits:
         return {"error": "That phone number is not 10 digits."}
 
-    conn = psycopg2.connect(**conn_params)
+    conn = psycopg2.connect(**{**KEEPALIVE, **conn_params})
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(_resolve_sql(key_field == "parcel"), {"key": key_value.strip()})
@@ -104,7 +106,7 @@ def apply_status(conn_params, *, address, digits, status,
     `address` is the Buybox spelling, from look_up(). Returns what it did:
     'updated' or 'added'.
     """
-    conn = psycopg2.connect(**conn_params)
+    conn = psycopg2.connect(**{**KEEPALIVE, **conn_params})
     try:
         with conn.cursor() as cur:
             cur.execute("""

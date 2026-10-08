@@ -79,7 +79,10 @@ index, so your loads keep working unchanged.
 ### Phone numbers are filed by address
 
 A phone number belongs to a **property address**, not a parcel: `property_phones` stores
-the address (as Buybox spells it) and `addr_key`, its `addr_norm()`. Every Buybox record
+the address (as Buybox spells it) and `addr_key`, its `addr_norm()` — the address
+upper-cased, punctuation dropped, street words abbreviated (`1570 Franklin Avenue` →
+`1570 FRANKLIN AVE`). Lookups and the one-number-per-address rule go by `addr_key`, so
+spellings of the same address cannot file the same number twice. Every Buybox record
 at that address shows the number, on the property page and in the search results, and
 the 30-number cap is per address.
 
@@ -223,7 +226,10 @@ button in the sidebar. The app connects as the database owner, not through the p
 `Buybox`, `Mail` and `SMS` are loaded straight into Supabase, so there is no page for them.
 
 Upload a CSV/XLSX with **Property address** and **Phone**. **Phone Type** and **Status**
-are optional. Each number is filed under the row's address; a **Match by** switch lets a
+are optional. A skip-trace export with several numbers per row — `Phone1`, `Phone1 Type`,
+`Phone2`, … — is recognised as such: every filled phone column is loaded with its type.
+A 133k-row export of that shape is ~513k numbers; each distinct address is looked up once,
+and the load runs without the 2-minute statement timeout, so expect it to take minutes. Each number is filed under the row's address; a **Match by** switch lets a
 file be matched by **Parcel Number** instead, in which case the number is filed under that
 parcel's address. Only the chosen column is used — a file that has both is never matched
 on the other one.
